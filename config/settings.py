@@ -49,7 +49,7 @@ class WorkflowConfig:
     platform: str = "xiaohongshu"
     daily_count: int = 1
     schedule_time: str = "08:00"
-    quality_threshold: float = 0.7
+    quality_threshold: float = 0.75
     optimization_rounds: int = 1
 
     @classmethod
@@ -60,7 +60,28 @@ class WorkflowConfig:
             platform=os.getenv("PLATFORM", cls.platform),
             daily_count=int(os.getenv("DAILY_COUNT", cls.daily_count)),
             schedule_time=os.getenv("SCHEDULE_TIME", cls.schedule_time),
-            quality_threshold=float(os.getenv("QUALITY_THRESHOLD", cls.quality_threshold)),
+            quality_threshold=float(
+                os.getenv("QUALITY_THRESHOLD", cls.quality_threshold)
+            ),
+        )
+
+
+@dataclass
+class MatrixConfig:
+    """Matrix account management configuration."""
+
+    enabled: bool = False
+    state_file: str = "data/matrix_state.json"
+    analytics_file: str = "data/analytics.json"
+    cover_variants: int = 3
+
+    @classmethod
+    def from_env(cls) -> MatrixConfig:
+        return cls(
+            enabled=os.getenv("MATRIX_ENABLED", "false").lower() == "true",
+            state_file=os.getenv("MATRIX_STATE_FILE", cls.state_file),
+            analytics_file=os.getenv("ANALYTICS_FILE", cls.analytics_file),
+            cover_variants=int(os.getenv("COVER_VARIANTS", cls.cover_variants)),
         )
 
 
@@ -71,6 +92,7 @@ class AppConfig:
     ai: AIConfig = field(default_factory=AIConfig)
     feishu: FeishuConfig = field(default_factory=FeishuConfig)
     workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
+    matrix: MatrixConfig = field(default_factory=MatrixConfig)
 
     @classmethod
     def from_env(cls) -> AppConfig:
@@ -78,4 +100,5 @@ class AppConfig:
             ai=AIConfig.from_env(),
             feishu=FeishuConfig.from_env(),
             workflow=WorkflowConfig.from_env(),
+            matrix=MatrixConfig.from_env(),
         )

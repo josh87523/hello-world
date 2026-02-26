@@ -1,4 +1,4 @@
-"""Topic research and selection module."""
+"""Topic research and selection module - enhanced with vertical-aware discovery."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from ai.client import AIClient
-from config.prompts.topic_research import TRENDING_TOPICS_PROMPT, TOPIC_REFINEMENT_PROMPT
+from config.prompts.topic_research import format_refinement_prompt, format_trending_prompt
 from core.pipeline import PipelineStep
 from models.content import ContentIdea, Platform
 
@@ -17,10 +17,18 @@ logger = logging.getLogger(__name__)
 class TopicResearchStep(PipelineStep):
     """Pipeline step that researches and selects a topic.
 
+    Enhanced with:
+    - Vertical-aware topic discovery (ai_tools, ai_tutorial, etc.)
+    - Account persona tone injection
+    - Save potential scoring
+    - Emotional payoff type tagging
+
     Input context:
         - platform: Platform enum
         - domains: list[str]
         - custom_topic: optional str
+        - account_tone: optional str (persona tone)
+        - account_vertical: optional str (content vertical)
 
     Output context (added):
         - idea: ContentIdea
@@ -35,6 +43,8 @@ class TopicResearchStep(PipelineStep):
         platform: Platform = context["platform"]
         domains: list[str] = context["domains"]
         custom_topic: str | None = context.get("custom_topic")
+        tone: str = context.get("account_tone", "友好专业")
+        vertical: str = context.get("account_vertical", "通用")
 
         if custom_topic:
             idea = ContentIdea(
@@ -46,11 +56,10 @@ class TopicResearchStep(PipelineStep):
             )
             ideas = [idea]
         else:
-            ideas = self._discover_topics(platform, domains)
+            ideas = self._discover_topics(platform, domains, tone, vertical)
             idea = self._select_best(ideas)
 
-        # Refine the selected topic
-        outline = self._refine_topic(idea, platform)
+        outline = self._refine_topic(idea, platform, tone)
 
         context["idea"] = idea
         context["all_ideas"] = ideas
@@ -58,17 +67,27 @@ class TopicResearchStep(PipelineStep):
         return context
 
     def _discover_topics(
-        self, platform: Platform, domains: list[str], count: int = 5
+        self,
+        platform: Platform,
+        domains: list[str],
+        tone: str = "友好专业",
+        vertical: str = "通用",
+        count: int = 5,
     ) -> list[ContentIdea]:
-        """Use AI to discover trending topics."""
-        prompt = TRENDING_TOPICS_PROMPT.format(
+        """Use AI to discover trending topics with viral formula awareness."""
+        prompt = format_trending_prompt(
             platform=platform.value,
-            domains="、".join(domains),
+            domains=domains,
             date=datetime.now().strftime("%Y-%m-%d"),
             count=count,
+            tone=tone,
+            vertical=vertical,
         )
 
-        data = self.ai.chat_json(prompt, system="你是一位专业的自媒体选题策划师。请始终返回有效的JSON。")
+        data = self.ai.chat_json(
+            prompt,
+            system="你是一位专业的小红书爆款选题策划师。请始终返回有效的JSON。",
+        )
         topics = data.get("topics", []) if isinstance(data, dict) else data
 
         ideas = []
@@ -81,41 +100,60 @@ class TopicResearchStep(PipelineStep):
                 competition_score=float(t.get("competition_score", 0)),
                 target_platforms=[platform],
                 source="ai_discovery",
-                metadata={"hook": t.get("hook", ""), "reason": t.get("reason", "")},
+                metadata={
+                    "hook": t.get("hook", ""),
+                    "reason": t.get("reason", ""),
+                    "emotional_payoff": t.get("emotional_payoff", ""),
+                    "save_potential": float(t.get("save_potential", 0)),
+                },
             )
             ideas.append(idea)
             logger.info(
-                "Topic found: %s (trending=%.2f, competition=%.2f)",
+                "Topic: %s (trending=%.2f, competition=%.2f, save=%.2f)",
                 idea.topic,
                 idea.trending_score,
                 idea.competition_score,
+                idea.metadata.get("save_potential", 0),
             )
 
         return ideas
 
     def _select_best(self, ideas: list[ContentIdea]) -> ContentIdea:
-        """Select the best topic based on scoring.
+        """Select the best topic based on composite scoring.
 
-        Score = trending_score * 0.6 + (1 - competition_score) * 0.4
-        Higher trending + lower competition = better.
+        Enhanced formula: save_potential contributes 30% of the score,
+        because save/like ratio is the strongest viral predictor.
+
+        Score = trending * 0.3 + (1 - competition) * 0.2 + save_potential * 0.5
         """
         if not ideas:
             raise ValueError("No topic ideas generated")
 
         def score(idea: ContentIdea) -> float:
-            return idea.trending_score * 0.6 + (1 - idea.competition_score) * 0.4
+            save_potential = idea.metadata.get("save_potential", 0.5)
+            return (
+                idea.trending_score * 0.3
+                + (1 - idea.competition_score) * 0.2
+                + save_potential * 0.5
+            )
 
         best = max(ideas, key=score)
         logger.info("Selected topic: %s (score=%.3f)", best.topic, score(best))
         return best
 
-    def _refine_topic(self, idea: ContentIdea, platform: Platform) -> dict[str, Any]:
-        """Refine the selected topic with detailed outline."""
-        prompt = TOPIC_REFINEMENT_PROMPT.format(
+    def _refine_topic(
+        self, idea: ContentIdea, platform: Platform, tone: str = "友好专业"
+    ) -> dict[str, Any]:
+        """Refine the selected topic with detailed outline and save triggers."""
+        prompt = format_refinement_prompt(
             topic=idea.topic,
             angle=idea.angle,
             platform=platform.value,
+            tone=tone,
         )
 
-        data = self.ai.chat_json(prompt, system="你是一位自媒体选题优化师。请始终返回有效的JSON。")
+        data = self.ai.chat_json(
+            prompt,
+            system="你是一位小红书选题优化师。请始终返回有效的JSON。",
+        )
         return data if isinstance(data, dict) else {"outline": data}

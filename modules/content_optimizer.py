@@ -1,4 +1,4 @@
-"""Content optimization module."""
+"""Content optimization module - enhanced with research-backed optimization."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from ai.client import AIClient
-from config.prompts.optimization import CONTENT_OPTIMIZATION_PROMPT
+from config.prompts.optimization import format_optimization_prompt
 from core.pipeline import PipelineStep
 from models.content import ContentDraft, ContentStatus
 
@@ -14,7 +14,13 @@ logger = logging.getLogger(__name__)
 
 
 class ContentOptimizationStep(PipelineStep):
-    """Pipeline step that optimizes draft content for the target platform.
+    """Pipeline step that optimizes draft content for maximum save/like ratio.
+
+    Enhanced with:
+    - Anti-AI phrase detection and removal
+    - Save/like ratio optimization
+    - 0.3-second title/hook optimization
+    - Multiple optimization rounds for higher quality
 
     Input context:
         - draft: ContentDraft
@@ -38,7 +44,7 @@ class ContentOptimizationStep(PipelineStep):
         for round_num in range(self.max_rounds):
             logger.info("Optimization round %d/%d", round_num + 1, self.max_rounds)
 
-            prompt = CONTENT_OPTIMIZATION_PROMPT.format(
+            prompt = format_optimization_prompt(
                 title=draft.title,
                 body=draft.body,
                 tags=", ".join(draft.tags),
@@ -46,11 +52,10 @@ class ContentOptimizationStep(PipelineStep):
 
             data = self.ai.chat_json(
                 prompt,
-                system="你是一位小红书内容优化专家。请始终返回有效的JSON。",
+                system="你是一位小红书内容优化专家，目标是最大化收藏率。请始终返回有效的JSON。",
                 temperature=0.5,
             )
 
-            # Update draft with optimized content
             draft.title = data.get("title", draft.title)
             draft.body = data.get("body", draft.body)
             draft.tags = data.get("tags", draft.tags)

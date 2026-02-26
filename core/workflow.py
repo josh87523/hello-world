@@ -1,4 +1,4 @@
-"""Main content workflow orchestrator."""
+"""Main content workflow orchestrator - enhanced with matrix and cover support."""
 
 from __future__ import annotations
 
@@ -15,12 +15,24 @@ logger = logging.getLogger(__name__)
 class ContentWorkflow:
     """Orchestrates the full content creation workflow.
 
-    This is the main entry point that builds and runs the pipeline
-    for a given platform and content domain.
+    Enhanced with:
+    - Matrix account persona injection (tone, vertical, domains)
+    - Cover strategy variant generation
+    - Analytics tracking integration
 
     Usage:
+        # Single account mode
         workflow = ContentWorkflow(ai_client=client, platform=Platform.XIAOHONGSHU)
-        results = workflow.run(domains=["ai", "创业", "写作"], count=3)
+        results = workflow.run(domains=["ai", "创业"], count=3)
+
+        # Matrix mode (with account persona)
+        results = workflow.run(
+            domains=["ai工具", "效率"],
+            count=2,
+            account_tone="极客+接地气",
+            account_vertical="ai_tools",
+            account_id="matrix_01",
+        )
     """
 
     def __init__(
@@ -28,22 +40,31 @@ class ContentWorkflow:
         ai_client: AIClient,
         platform: Platform = Platform.XIAOHONGSHU,
         feishu_client: Any | None = None,
+        cover_variants: int = 3,
     ):
         self.ai = ai_client
         self.platform = platform
         self.feishu = feishu_client
+        self.cover_variants = cover_variants
 
-    def build_pipeline(self) -> Pipeline:
-        """Build the full content pipeline with all steps."""
-        from modules.topic_research import TopicResearchStep
+    def build_pipeline(self, include_cover: bool = True) -> Pipeline:
+        """Build the full content pipeline with all steps.
+
+        Args:
+            include_cover: Whether to include cover variant generation step.
+        """
         from modules.content_generator import ContentGenerationStep
         from modules.content_optimizer import ContentOptimizationStep
+        from modules.cover_strategy import CoverStrategyStep
         from modules.quality_checker import QualityCheckStep
+        from modules.topic_research import TopicResearchStep
 
         pipeline = Pipeline(name=f"content-{self.platform.value}")
         pipeline.add_step(TopicResearchStep(self.ai))
         pipeline.add_step(ContentGenerationStep(self.ai))
         pipeline.add_step(ContentOptimizationStep(self.ai))
+        if include_cover:
+            pipeline.add_step(CoverStrategyStep(self.ai, self.cover_variants))
         pipeline.add_step(QualityCheckStep(self.ai))
 
         return pipeline
@@ -53,13 +74,19 @@ class ContentWorkflow:
         domains: list[str] | None = None,
         count: int = 1,
         custom_topic: str | None = None,
+        account_tone: str = "友好专业",
+        account_vertical: str = "通用",
+        account_id: str = "",
     ) -> list[dict[str, Any]]:
         """Run the full workflow and return results.
 
         Args:
-            domains: Content domains (e.g., ["ai", "创业", "写作"]).
+            domains: Content domains (e.g., ["ai工具", "效率"]).
             count: Number of content pieces to generate.
             custom_topic: Optional specific topic to write about.
+            account_tone: Persona tone for this account.
+            account_vertical: Content vertical for this account.
+            account_id: Matrix account identifier.
 
         Returns:
             List of pipeline result dicts.
@@ -68,13 +95,22 @@ class ContentWorkflow:
         results = []
 
         for i in range(count):
-            logger.info("Generating content %d/%d", i + 1, count)
+            logger.info(
+                "Generating content %d/%d (account=%s, vertical=%s)",
+                i + 1,
+                count,
+                account_id or "default",
+                account_vertical,
+            )
 
             context = {
                 "platform": self.platform,
                 "domains": domains,
                 "content_index": i,
                 "custom_topic": custom_topic,
+                "account_tone": account_tone,
+                "account_vertical": account_vertical,
+                "account_id": account_id,
             }
 
             pipeline = self.build_pipeline()

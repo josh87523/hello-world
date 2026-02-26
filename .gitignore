@@ -17,6 +17,9 @@ build/
 *.swp
 *.swo
 
+# Data (runtime state, not tracked)
+data/
+
 # OS
 .DS_Store
 Thumbs.db
