@@ -27,6 +27,8 @@ TRENDING_TOPICS_PROMPT = """\
 - 优先选择收藏/赞比 > 1.0 的内容类型
 - 每个选题必须有一个明确的"情感满足类型"
 
+{competitor_context}
+
 请生成 {count} 个高潜力选题，每个选题包含：
 
 1. topic: 选题标题（直击痛点，引发好奇）
@@ -72,8 +74,23 @@ def format_trending_prompt(
     count: int = 5,
     tone: str = "友好专业",
     vertical: str = "通用",
+    competitor_context: str = "",
 ) -> str:
-    """Format the trending topics prompt with all research-backed components."""
+    """Format the trending topics prompt with all research-backed components.
+
+    Args:
+        competitor_context: Optional text block with competitor analysis data
+            from CompetitorAnalyzer.get_competitor_summary_text(). When provided,
+            topic research will factor in competitor strengths and gaps.
+    """
+    ctx = ""
+    if competitor_context:
+        ctx = (
+            "## 对标账号参考（基于真实数据）\n"
+            "以下是对标账号的高赞内容数据，请参考但不要直接抄袭，"
+            "要做出差异化：\n\n" + competitor_context
+        )
+
     return TRENDING_TOPICS_PROMPT.format(
         platform=platform,
         domains="、".join(domains),
@@ -83,6 +100,7 @@ def format_trending_prompt(
         vertical=vertical,
         emotional_payoff_types=EMOTIONAL_PAYOFF_TYPES,
         save_optimization=SAVE_OPTIMIZATION,
+        competitor_context=ctx,
     )
 
 

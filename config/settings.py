@@ -86,6 +86,33 @@ class MatrixConfig:
 
 
 @dataclass
+class ScraperConfig:
+    """XHS scraper configuration."""
+
+    cookie: str = ""
+    rate_limit: float = 2.0
+    max_notes_per_search: int = 40
+    max_notes_per_user: int = 50
+    data_dir: str = "data/scraper"
+    benchmark_file: str = "data/benchmark.json"
+
+    @classmethod
+    def from_env(cls) -> ScraperConfig:
+        return cls(
+            cookie=os.getenv("XHS_COOKIE", ""),
+            rate_limit=float(os.getenv("XHS_RATE_LIMIT", "2.0")),
+            max_notes_per_search=int(os.getenv("XHS_MAX_SEARCH", "40")),
+            max_notes_per_user=int(os.getenv("XHS_MAX_USER_NOTES", "50")),
+            data_dir=os.getenv("XHS_DATA_DIR", cls.data_dir),
+            benchmark_file=os.getenv("BENCHMARK_FILE", cls.benchmark_file),
+        )
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.cookie)
+
+
+@dataclass
 class AppConfig:
     """Top-level app configuration."""
 
@@ -93,6 +120,7 @@ class AppConfig:
     feishu: FeishuConfig = field(default_factory=FeishuConfig)
     workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
     matrix: MatrixConfig = field(default_factory=MatrixConfig)
+    scraper: ScraperConfig = field(default_factory=ScraperConfig)
 
     @classmethod
     def from_env(cls) -> AppConfig:
@@ -101,4 +129,5 @@ class AppConfig:
             feishu=FeishuConfig.from_env(),
             workflow=WorkflowConfig.from_env(),
             matrix=MatrixConfig.from_env(),
+            scraper=ScraperConfig.from_env(),
         )

@@ -77,6 +77,7 @@ class ContentWorkflow:
         account_tone: str = "友好专业",
         account_vertical: str = "通用",
         account_id: str = "",
+        competitor_context: str = "",
     ) -> list[dict[str, Any]]:
         """Run the full workflow and return results.
 
@@ -87,6 +88,7 @@ class ContentWorkflow:
             account_tone: Persona tone for this account.
             account_vertical: Content vertical for this account.
             account_id: Matrix account identifier.
+            competitor_context: Benchmark data text to inform topic selection.
 
         Returns:
             List of pipeline result dicts.
@@ -111,6 +113,7 @@ class ContentWorkflow:
                 "account_tone": account_tone,
                 "account_vertical": account_vertical,
                 "account_id": account_id,
+                "competitor_context": competitor_context,
             }
 
             pipeline = self.build_pipeline()

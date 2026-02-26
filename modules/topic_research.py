@@ -29,6 +29,7 @@ class TopicResearchStep(PipelineStep):
         - custom_topic: optional str
         - account_tone: optional str (persona tone)
         - account_vertical: optional str (content vertical)
+        - competitor_context: optional str (benchmark data for informed topic selection)
 
     Output context (added):
         - idea: ContentIdea
@@ -45,6 +46,7 @@ class TopicResearchStep(PipelineStep):
         custom_topic: str | None = context.get("custom_topic")
         tone: str = context.get("account_tone", "友好专业")
         vertical: str = context.get("account_vertical", "通用")
+        competitor_context: str = context.get("competitor_context", "")
 
         if custom_topic:
             idea = ContentIdea(
@@ -56,7 +58,9 @@ class TopicResearchStep(PipelineStep):
             )
             ideas = [idea]
         else:
-            ideas = self._discover_topics(platform, domains, tone, vertical)
+            ideas = self._discover_topics(
+                platform, domains, tone, vertical, competitor_context=competitor_context
+            )
             idea = self._select_best(ideas)
 
         outline = self._refine_topic(idea, platform, tone)
@@ -73,8 +77,9 @@ class TopicResearchStep(PipelineStep):
         tone: str = "友好专业",
         vertical: str = "通用",
         count: int = 5,
+        competitor_context: str = "",
     ) -> list[ContentIdea]:
-        """Use AI to discover trending topics with viral formula awareness."""
+        """Use AI to discover trending topics with viral formula + competitor awareness."""
         prompt = format_trending_prompt(
             platform=platform.value,
             domains=domains,
@@ -82,6 +87,7 @@ class TopicResearchStep(PipelineStep):
             count=count,
             tone=tone,
             vertical=vertical,
+            competitor_context=competitor_context,
         )
 
         data = self.ai.chat_json(

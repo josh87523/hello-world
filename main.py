@@ -1,34 +1,37 @@
 """Social Media AI Workflow - Main entry point.
 
 自媒体 AI 工作流：从选题到发布的全自动化内容生产系统。
-支持矩阵号运营、封面策略、数据追踪与迭代优化。
+支持矩阵号运营、对标分析、数据爬取、封面策略与迭代优化。
 
 Usage:
     # 单次生成
     python main.py run
 
-    # 指定话题生成
+    # 指定话题
     python main.py run --topic "AI Agent 正在替代程序员？"
 
-    # 生成多篇
-    python main.py run --count 3
-
-    # 矩阵模式：全部账号批量生成
+    # 矩阵批量生成
     python main.py matrix
-
-    # 矩阵模式：指定账号
     python main.py matrix --account matrix_01
-
-    # 查看矩阵状态
     python main.py matrix --status
 
-    # 查看数据分析
+    # 数据爬取
+    python main.py scrape --keyword "AI工具推荐" --count 30
+    python main.py scrape --user <user_id> --count 50
+    python main.py scrape --note <note_id>
+    python main.py scrape --import data/notes.json
+
+    # 对标分析
+    python main.py benchmark --add <user_id> --name "博主昵称" --vertical ai_tools
+    python main.py benchmark --list
+    python main.py benchmark --analyze
+    python main.py benchmark --report
+
+    # 数据分析
     python main.py analytics
+    python main.py analytics --update <id> --likes 500 --saves 300
 
-    # 更新内容表现数据
-    python main.py analytics --update <content_id> --likes 500 --saves 300 --comments 80
-
-    # 定时任务模式
+    # 定时任务
     python main.py schedule
 """
 
@@ -46,7 +49,9 @@ from core.workflow import ContentWorkflow
 from integrations.feishu import FeishuClient
 from models.content import Platform
 from modules.analytics_tracker import AnalyticsTracker, ContentRecord
+from modules.competitor_analyzer import CompetitorAnalyzer
 from modules.matrix_manager import MatrixManager
+from modules.xhs_scraper import ScraperConfig as XhsScraperConfig, XhsScraper
 
 logging.basicConfig(
     level=logging.INFO,
@@ -258,6 +263,289 @@ def cmd_analytics(args: argparse.Namespace, config: AppConfig) -> None:
         )
 
 
+def cmd_scrape(args: argparse.Namespace, config: AppConfig) -> None:
+    """Scrape data from Xiaohongshu."""
+    scraper_cfg = XhsScraperConfig(
+        cookie=config.scraper.cookie,
+        rate_limit=config.scraper.rate_limit,
+        max_notes_per_search=config.scraper.max_notes_per_search,
+        max_notes_per_user=config.scraper.max_notes_per_user,
+        data_dir=config.scraper.data_dir,
+    )
+
+    # Import from file (no cookie needed)
+    if args.import_file:
+        scraper = XhsScraper(scraper_cfg)
+        notes = scraper.import_from_file(args.import_file)
+        if notes:
+            print(f"Imported {len(notes)} notes from {args.import_file}")
+            _print_scraped_notes(notes, top_n=args.top or 10, json_output=args.json)
+        else:
+            print("No notes imported. Check file format.")
+        return
+
+    # Online scraping requires cookie
+    if not scraper_cfg.is_configured:
+        print(
+            "Error: XHS_COOKIE not set. Required for online scraping.\n"
+            "Set XHS_COOKIE in .env or use --import to load from file."
+        )
+        sys.exit(1)
+
+    scraper = XhsScraper(scraper_cfg)
+
+    if args.keyword:
+        notes = scraper.search_notes(
+            args.keyword,
+            count=args.count or scraper_cfg.max_notes_per_search,
+        )
+        print(f"\nSearch results for '{args.keyword}': {len(notes)} notes")
+        _print_scraped_notes(notes, top_n=args.top or 10, json_output=args.json)
+
+    elif args.user:
+        notes = scraper.scrape_user_notes(
+            args.user,
+            count=args.count or scraper_cfg.max_notes_per_user,
+        )
+        print(f"\nUser {args.user}: {len(notes)} notes scraped")
+        _print_scraped_notes(notes, top_n=args.top or 10, json_output=args.json)
+
+    elif args.note:
+        note = scraper.scrape_note_detail(args.note)
+        if note:
+            print(f"\nNote detail: {note.note_id}")
+            print(f"Title: {note.title}")
+            print(f"Author: {note.author_name}")
+            print(f"Likes: {note.likes} | Saves: {note.saves} | Comments: {note.comments}")
+            print(f"Save/Like ratio: {note.save_like_ratio:.2f}")
+            print(f"Tags: {', '.join(note.tags)}")
+            print(f"\n{note.body[:1000]}")
+            if args.json:
+                print(f"\n--- JSON ---\n{json.dumps(note.to_dict(), ensure_ascii=False, indent=2)}")
+        else:
+            print(f"Failed to scrape note: {args.note}")
+    else:
+        print("Specify --keyword, --user, --note, or --import. See --help.")
+
+    scraper.close()
+
+
+def cmd_benchmark(args: argparse.Namespace, config: AppConfig) -> None:
+    """Manage competitor benchmarks and analysis."""
+    # Build AI client for analysis (optional)
+    ai_client = None
+    has_api = bool(config.ai.api_key)
+    if has_api:
+        ai_client = AIClient(api_key=config.ai.api_key, model=config.ai.model)
+
+    # Build scraper (optional, for online scraping)
+    scraper = None
+    if config.scraper.is_configured:
+        scraper_cfg = XhsScraperConfig(
+            cookie=config.scraper.cookie,
+            rate_limit=config.scraper.rate_limit,
+            data_dir=config.scraper.data_dir,
+        )
+        scraper = XhsScraper(scraper_cfg)
+
+    analyzer = CompetitorAnalyzer(
+        ai=ai_client,
+        scraper=scraper,
+        data_file=config.scraper.benchmark_file,
+    )
+
+    if args.add:
+        comp = analyzer.add_competitor(
+            user_id=args.add,
+            nickname=args.name or args.add,
+            vertical=args.vertical or "",
+        )
+        print(f"Added competitor: {comp.nickname} ({comp.user_id})")
+
+        # Auto-scrape if cookie available
+        if scraper:
+            print(f"Scraping {comp.nickname}'s notes...")
+            notes = analyzer.scrape_competitor(comp.user_id, count=args.count or 30)
+            print(f"Scraped {len(notes)} notes")
+            analyzer.compute_competitor_stats(comp.user_id)
+            _print_competitor(comp)
+
+    elif args.remove:
+        if analyzer.remove_competitor(args.remove):
+            print(f"Removed competitor: {args.remove}")
+        else:
+            print(f"Competitor not found: {args.remove}")
+
+    elif args.list:
+        competitors = analyzer.list_competitors()
+        if not competitors:
+            print("No competitors tracked. Use --add <user_id> to add one.")
+            return
+
+        print(f"\n{'='*60}")
+        print(f"BENCHMARK ACCOUNTS ({len(competitors)})")
+        print(f"{'='*60}")
+
+        for comp in competitors:
+            _print_competitor(comp)
+
+    elif args.analyze:
+        if args.analyze == "all":
+            # Scrape and analyze all
+            if scraper:
+                print("Scraping all competitors...")
+                total = analyzer.scrape_all_competitors(count=args.count or 30)
+                print(f"Total notes scraped: {total}")
+
+            analyzer.compute_all_stats()
+
+            # AI analysis per competitor
+            if ai_client:
+                for comp in analyzer.competitors:
+                    print(f"\nAnalyzing {comp.nickname}...")
+                    style = analyzer.analyze_competitor_style(comp.user_id)
+                    if style:
+                        print(f"  Style: {style.get('writing_style', 'N/A')[:100]}")
+                        print(f"  Strategies: {', '.join(style.get('reusable_strategies', []))}")
+
+            print("\nAnalysis complete.")
+            for comp in analyzer.competitors:
+                _print_competitor(comp)
+        else:
+            # Analyze specific competitor
+            user_id = args.analyze
+            if scraper:
+                analyzer.scrape_competitor(user_id, count=args.count or 30)
+            comp = analyzer.compute_competitor_stats(user_id)
+            if comp:
+                _print_competitor(comp)
+                if ai_client:
+                    style = analyzer.analyze_competitor_style(user_id)
+                    if style:
+                        print(f"\n  Content style analysis:")
+                        print(f"    Style: {style.get('writing_style', 'N/A')}")
+                        print(f"    Structure: {style.get('content_structure', 'N/A')}")
+                        for s in style.get("reusable_strategies", []):
+                            print(f"    Strategy: {s}")
+            else:
+                print(f"Competitor not found: {user_id}")
+
+    elif args.report:
+        if not analyzer.competitors:
+            print("No competitors to report on. Use --add first.")
+            return
+
+        print("Generating benchmark report...")
+        report = analyzer.generate_report()
+
+        print(f"\n{'='*60}")
+        print("BENCHMARK REPORT")
+        print(f"{'='*60}")
+
+        print(f"\nCompetitors analyzed: {len(report.competitors)}")
+        print(f"Total notes: {sum(c.total_notes for c in report.competitors)}")
+        print(f"Avg save/like ratio: {report.avg_save_like_ratio:.2f}")
+
+        if report.title_patterns:
+            print(f"\n--- Title patterns ---")
+            for p in report.title_patterns:
+                print(f"  - {p}")
+
+        if report.content_patterns:
+            print(f"\n--- Viral traits ---")
+            for p in report.content_patterns:
+                print(f"  - {p}")
+
+        if report.best_tags:
+            print(f"\n--- Best tags ---")
+            print(f"  {', '.join(report.best_tags[:15])}")
+
+        if report.recommendations:
+            print(f"\n--- Action items ---")
+            for r in report.recommendations:
+                print(f"  - {r}")
+
+        if args.json:
+            print(f"\n--- JSON ---\n{json.dumps(report.to_dict(), ensure_ascii=False, indent=2)}")
+
+    elif args.insights:
+        insights = analyzer.get_topic_insights()
+        if not insights.get("has_benchmark"):
+            print("No benchmark data. Use --add and --analyze first.")
+            return
+
+        print(f"\n{'='*60}")
+        print("COMPETITOR INSIGHTS FOR TOPIC RESEARCH")
+        print(f"{'='*60}")
+        print(f"\nCompetitors: {insights['competitor_count']}")
+        print(f"Notes analyzed: {insights['total_notes_analyzed']}")
+        print(f"Avg viral rate: {insights['avg_viral_rate']:.1%}")
+
+        print(f"\n--- Top performing titles ---")
+        for t in insights.get("top_performing_titles", [])[:10]:
+            print(f"  [{t['interactions']}] {t['title']}")
+
+        print(f"\n--- Best tags ---")
+        print(f"  {', '.join(insights.get('best_tags', []))}")
+
+    else:
+        print("Specify --add, --list, --analyze, --report, or --insights. See --help.")
+
+    if scraper:
+        scraper.close()
+
+
+def _print_scraped_notes(
+    notes: list, top_n: int = 10, json_output: bool = False
+) -> None:
+    """Print scraped notes summary."""
+    sorted_notes = sorted(notes, key=lambda n: n.total_interactions, reverse=True)
+
+    print(f"\n--- Top {min(top_n, len(sorted_notes))} by engagement ---")
+    for i, n in enumerate(sorted_notes[:top_n]):
+        print(
+            f"  {i+1}. [{n.total_interactions}互动] {n.title}\n"
+            f"     赞{n.likes} 藏{n.saves} 评{n.comments} "
+            f"| 藏赞比{n.save_like_ratio:.2f} "
+            f"| @{n.author_name}"
+        )
+
+    # Summary stats
+    if notes:
+        avg_likes = sum(n.likes for n in notes) / len(notes)
+        avg_saves = sum(n.saves for n in notes) / len(notes)
+        total_saves = sum(n.saves for n in notes)
+        total_likes = sum(n.likes for n in notes)
+        viral = sum(1 for n in notes if n.total_interactions >= 1000)
+        print(f"\n  Summary: {len(notes)} notes, avg {avg_likes:.0f} likes, "
+              f"avg {avg_saves:.0f} saves, "
+              f"save/like {total_saves/total_likes:.2f}" if total_likes else "",
+              f", viral {viral}/{len(notes)} ({viral/len(notes):.0%})")
+
+    if json_output:
+        print(f"\n--- JSON ---\n{json.dumps([n.to_dict() for n in sorted_notes[:top_n]], ensure_ascii=False, indent=2)}")
+
+
+def _print_competitor(comp) -> None:
+    """Print a single competitor's stats."""
+    print(f"\n  {comp.nickname} ({comp.user_id})")
+    print(f"    Vertical: {comp.vertical or 'N/A'}")
+    print(f"    Notes: {comp.total_notes} | Followers: {comp.followers:,}")
+    if comp.avg_likes > 0:
+        print(
+            f"    Avg likes: {comp.avg_likes:.0f} | "
+            f"Avg saves: {comp.avg_saves:.0f} | "
+            f"Save/like: {comp.avg_save_like_ratio:.2f}"
+        )
+        print(f"    Viral rate: {comp.viral_rate:.1%}")
+    if comp.posting_frequency:
+        print(f"    Posting: {comp.posting_frequency}")
+    if comp.common_tags:
+        print(f"    Top tags: {', '.join(comp.common_tags[:8])}")
+    if comp.last_scraped:
+        print(f"    Last scraped: {comp.last_scraped[:19]}")
+
+
 def cmd_schedule(args: argparse.Namespace, config: AppConfig) -> None:
     """Start the scheduler for daily content generation."""
     workflow = build_workflow(config)
@@ -408,6 +696,29 @@ def main():
     analytics_parser.add_argument("--views", type=int, help="浏览数")
     analytics_parser.add_argument("--json", action="store_true", help="输出JSON格式")
 
+    # scrape: data scraping
+    scrape_parser = subparsers.add_parser("scrape", help="小红书数据爬取")
+    scrape_parser.add_argument("--keyword", "-k", help="按关键词搜索笔记")
+    scrape_parser.add_argument("--user", "-u", help="爬取指定用户的笔记")
+    scrape_parser.add_argument("--note", help="爬取单条笔记详情")
+    scrape_parser.add_argument("--import", dest="import_file", help="从JSON文件导入笔记数据")
+    scrape_parser.add_argument("--count", "-n", type=int, help="最大爬取数量")
+    scrape_parser.add_argument("--top", type=int, help="显示前N条结果")
+    scrape_parser.add_argument("--json", action="store_true", help="输出JSON格式")
+
+    # benchmark: competitor analysis
+    bench_parser = subparsers.add_parser("benchmark", help="对标账号分析")
+    bench_parser.add_argument("--add", help="添加对标账号（传入user_id）")
+    bench_parser.add_argument("--name", help="对标账号昵称（配合--add使用）")
+    bench_parser.add_argument("--vertical", help="对标账号垂类（配合--add使用）")
+    bench_parser.add_argument("--remove", help="移除对标账号（传入user_id）")
+    bench_parser.add_argument("--list", action="store_true", help="列出所有对标账号")
+    bench_parser.add_argument("--analyze", nargs="?", const="all", help="分析对标账号（指定user_id或all）")
+    bench_parser.add_argument("--report", action="store_true", help="生成对标分析报告")
+    bench_parser.add_argument("--insights", action="store_true", help="查看对标洞察（供选题参考）")
+    bench_parser.add_argument("--count", "-n", type=int, help="爬取笔记数量")
+    bench_parser.add_argument("--json", action="store_true", help="输出JSON格式")
+
     # schedule: daily automation
     subparsers.add_parser("schedule", help="启动定时任务模式")
 
@@ -418,6 +729,8 @@ def main():
     is_info_only = (
         (args.command == "matrix" and getattr(args, "status", False))
         or args.command == "analytics"
+        or args.command == "scrape"
+        or args.command == "benchmark"
     )
     needs_api = args.command in ("run", "matrix", "schedule") and not is_info_only
     if needs_api and not config.ai.api_key and not is_dry_run:
@@ -431,6 +744,8 @@ def main():
         "run": cmd_run,
         "matrix": cmd_matrix,
         "analytics": cmd_analytics,
+        "scrape": cmd_scrape,
+        "benchmark": cmd_benchmark,
         "schedule": cmd_schedule,
     }
 
