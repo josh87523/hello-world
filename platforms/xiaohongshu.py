@@ -11,7 +11,7 @@ from platforms.base import PlatformAdapter
 logger = logging.getLogger(__name__)
 
 # Xiaohongshu content constraints
-XHS_TITLE_MAX_LENGTH = 20
+XHS_TITLE_MAX_LENGTH = 25
 XHS_BODY_MAX_LENGTH = 1000  # characters
 XHS_BODY_MIN_LENGTH = 100
 XHS_MAX_TAGS = 10

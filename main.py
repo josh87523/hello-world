@@ -41,12 +41,17 @@ logger = logging.getLogger(__name__)
 PLATFORM_MAP = {p.value: p for p in Platform}
 
 
-def build_workflow(config: AppConfig) -> ContentWorkflow:
+def build_workflow(config: AppConfig, dry_run: bool = False) -> ContentWorkflow:
     """Build the workflow from configuration."""
-    ai_client = AIClient(
-        api_key=config.ai.api_key,
-        model=config.ai.model,
-    )
+    if dry_run:
+        from ai.mock import MockAIClient
+
+        ai_client = MockAIClient()
+    else:
+        ai_client = AIClient(
+            api_key=config.ai.api_key,
+            model=config.ai.model,
+        )
 
     feishu_client = None
     if config.feishu.is_configured:
@@ -67,7 +72,7 @@ def build_workflow(config: AppConfig) -> ContentWorkflow:
 
 def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
     """Run the content workflow once."""
-    workflow = build_workflow(config)
+    workflow = build_workflow(config, dry_run=args.dry_run)
 
     results = workflow.run(
         domains=config.workflow.domains,
@@ -145,6 +150,7 @@ def main():
     run_parser.add_argument("--topic", "-t", help="指定话题（不指定则自动选题）")
     run_parser.add_argument("--count", "-n", type=int, default=1, help="生成篇数")
     run_parser.add_argument("--json", action="store_true", help="输出JSON格式")
+    run_parser.add_argument("--dry-run", action="store_true", help="使用模拟数据测试（不调用API）")
 
     # schedule command
     subparsers.add_parser("schedule", help="启动定时任务模式")
@@ -152,7 +158,8 @@ def main():
     args = parser.parse_args()
     config = AppConfig.from_env()
 
-    if not config.ai.api_key:
+    is_dry_run = args.command == "run" and getattr(args, "dry_run", False)
+    if not config.ai.api_key and not is_dry_run:
         print("Error: ANTHROPIC_API_KEY not set. See .env.example for configuration.")
         sys.exit(1)
 
