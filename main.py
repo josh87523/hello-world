@@ -45,7 +45,6 @@ def build_workflow(config: AppConfig) -> ContentWorkflow:
     """Build the workflow from configuration."""
     ai_client = AIClient(
         api_key=config.ai.api_key,
-        base_url=config.ai.base_url,
         model=config.ai.model,
     )
 
@@ -154,7 +153,7 @@ def main():
     config = AppConfig.from_env()
 
     if not config.ai.api_key:
-        print("Error: DASHSCOPE_API_KEY not set. See .env.example for configuration.")
+        print("Error: ANTHROPIC_API_KEY not set. See .env.example for configuration.")
         sys.exit(1)
 
     if args.command == "run":
