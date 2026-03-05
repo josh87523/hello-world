@@ -112,9 +112,17 @@ class InstagramAdapter(BrowserPlatformAdapter):
 
         await page.wait_for_timeout(1000)
 
-        # 分享
-        share_btn = page.locator('div[role="button"]:has-text("Share"), button:has-text("Share"), button:has-text("分享")').first
-        await share_btn.click()
+        # 分享（用 dispatchEvent 触发 React 事件）
+        await page.evaluate("""() => {
+            const btns = document.querySelectorAll('div[role="button"], button');
+            for (const btn of btns) {
+                const text = btn.textContent.trim();
+                if (text === 'Share' || text === '分享') {
+                    btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                    break;
+                }
+            }
+        }""")
         await page.wait_for_timeout(5000)
 
         logger.info("Instagram 帖子发布成功")

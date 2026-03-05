@@ -94,9 +94,17 @@ class ThreadsAdapter(BrowserPlatformAdapter):
                 await file_input.set_input_files(img_path)
                 await page.wait_for_timeout(2000)
 
-        # 点击 Post/发布
-        post_btn = page.locator('div[role="button"]:has-text("Post"), div[role="button"]:has-text("发布")').first
-        await post_btn.click(force=True)
+        # 点击 Post/发布（用 dispatchEvent 触发 React 事件）
+        await page.evaluate("""() => {
+            const btns = document.querySelectorAll('div[role="button"]');
+            for (const btn of btns) {
+                const text = btn.textContent.trim();
+                if (text === 'Post' || text === '发布') {
+                    btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                    break;
+                }
+            }
+        }""")
         await page.wait_for_timeout(3000)
 
         logger.info("Threads 帖子发布成功")
