@@ -635,6 +635,70 @@ def cmd_ingest(args: argparse.Namespace, config: AppConfig) -> None:
     scraper.close()
 
 
+def cmd_generate_image(args: argparse.Namespace, config: AppConfig) -> None:
+    """AI 图片生成（支持多 Provider 对比）。"""
+    import asyncio
+    from pathlib import Path
+    from modules.image_gen import (
+        list_all_providers, get_provider, get_available_providers, compare_providers,
+    )
+
+    # 列出所有 Provider
+    if args.list:
+        providers = list_all_providers()
+        print(f"\n{'='*60}")
+        print("图片生成 Provider 列表")
+        print(f"{'='*60}")
+        for name, info in providers.items():
+            status = "✓ 可用" if info["available"] else "✗ 缺少 API Key"
+            print(f"\n  {name}: {info['name']}")
+            print(f"    价格: {info['price']}")
+            print(f"    状态: {status}")
+            if not info["available"]:
+                print(f"    需要: {', '.join(info['env_vars'])}")
+        return
+
+    if not args.prompt:
+        print("Error: 需要 --prompt 参数（或使用 --list 查看 Provider 列表）")
+        sys.exit(1)
+
+    prompt = args.prompt
+    w, h = [int(x) for x in args.size.split("x")]
+    output_dir = Path(args.output) if args.output else None
+
+    # 对比模式
+    if args.providers:
+        provider_list = None if args.providers == "all" else args.providers.split(",")
+        print(f"\n对比生成中... prompt: {prompt[:60]}...")
+        results = asyncio.run(compare_providers(
+            prompt=prompt,
+            providers=provider_list,
+            size=(w, h),
+            output_dir=output_dir,
+        ))
+
+        print(f"\n{'='*60}")
+        print("对比结果")
+        print(f"{'='*60}")
+        for name, r in results.items():
+            if r["error"]:
+                print(f"  {name}: 失败 ({r['time']}s) — {r['error']}")
+            else:
+                print(f"  {name}: 成功 ({r['time']}s) → {r['path']}")
+        return
+
+    # 单个 Provider
+    provider_name = args.provider or "flux"
+    gen = get_provider(provider_name)
+    if not gen.is_available():
+        print(f"Provider {provider_name} 不可用，需要: {', '.join(gen.required_env_vars)}")
+        sys.exit(1)
+
+    print(f"使用 {provider_name} 生成中... prompt: {prompt[:60]}...")
+    path = asyncio.run(gen.generate(prompt, size=(w, h), style=args.style, output_dir=output_dir))
+    print(f"生成完成: {path}")
+
+
 def cmd_publish(args: argparse.Namespace, config: AppConfig) -> None:
     """多平台发布。"""
     from core.multi_publish import MultiPlatformPublisher, load_content_json
@@ -960,7 +1024,18 @@ def main():
     publish_parser = subparsers.add_parser("publish", help="多平台发布")
     publish_parser.add_argument("--file", "-f", help="内容 JSON 文件路径")
     publish_parser.add_argument("--platforms", "-p", help="指定平台（逗号分隔，如 twitter,jike）")
+    publish_parser.add_argument("--image-provider", help="图片生成 Provider（flux/gpt4o/recraft/siliconflow/wanxiang）")
     publish_parser.add_argument("--dry-run", action="store_true", help="只校验不发布")
+
+    # generate-image: AI 图片生成
+    img_parser = subparsers.add_parser("generate-image", help="AI 图片生成（多 Provider 对比）")
+    img_parser.add_argument("--prompt", help="图片描述（英文效果更好）")
+    img_parser.add_argument("--provider", help="指定 Provider（flux/gpt4o/recraft/siliconflow/wanxiang）")
+    img_parser.add_argument("--providers", help="对比多个 Provider（逗号分隔，或 all）")
+    img_parser.add_argument("--size", default="1080x1440", help="图片尺寸 WxH（默认 1080x1440）")
+    img_parser.add_argument("--style", default="natural", help="风格（natural/vivid/artistic）")
+    img_parser.add_argument("--output", "-o", help="输出目录（默认 /tmp/image_gen/）")
+    img_parser.add_argument("--list", action="store_true", help="列出所有 Provider 及状态")
 
     # login: platform login
     login_parser = subparsers.add_parser("login", help="平台登录（保存 session）")
@@ -981,6 +1056,7 @@ def main():
         or args.command == "benchmark"
         or args.command == "ingest"
         or args.command == "publish"
+        or args.command == "generate-image"
         or args.command == "login"
     )
     needs_api = args.command in ("run", "matrix", "schedule") and not is_info_only
@@ -999,6 +1075,7 @@ def main():
         "benchmark": cmd_benchmark,
         "ingest": cmd_ingest,
         "publish": cmd_publish,
+        "generate-image": cmd_generate_image,
         "login": cmd_login,
         "schedule": cmd_schedule,
     }

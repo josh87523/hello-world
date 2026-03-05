@@ -138,21 +138,91 @@ class InstagramAdapter(BrowserPlatformAdapter):
 
         await page.wait_for_timeout(1000)
 
-        # 分享（用 dispatchEvent 触发 React 事件）
-        await page.evaluate("""() => {
-            const btns = document.querySelectorAll('div[role="button"], button');
-            for (const btn of btns) {
-                const text = btn.textContent.trim();
-                if (text === 'Share' || text === '分享') {
-                    btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
-                    break;
+        # 分享 — 精确匹配对话框头部的「分享」按钮（不是"分享到"区域）
+        # 截图分析：「分享」是右上角蓝色文字按钮，在 "创建新帖子" 标题旁边
+        share_result = await page.evaluate("""() => {
+            // 策略1: 查找 header 区域中精确匹配 "分享"/"Share" 的元素
+            const allEls = document.querySelectorAll('div[role="button"], button, span, a');
+            const candidates = [];
+            for (const el of allEls) {
+                const text = el.textContent.trim();
+                // 精确匹配：只匹配 "分享" 或 "Share"，排除 "分享到" 等
+                if (text === '分享' || text === 'Share') {
+                    candidates.push(el);
                 }
             }
+            // 优先选择在页面顶部的元素（header 中的分享按钮 y 坐标较小）
+            candidates.sort((a, b) => {
+                const ra = a.getBoundingClientRect();
+                const rb = b.getBoundingClientRect();
+                return ra.top - rb.top;
+            });
+            if (candidates.length > 0) {
+                const btn = candidates[0];
+                btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                const rect = btn.getBoundingClientRect();
+                return 'clicked:' + btn.textContent.trim() + ' at y=' + Math.round(rect.top);
+            }
+            return null;
         }""")
-        await page.wait_for_timeout(5000)
+        logger.info("Share 按钮点击结果: %s", share_result)
 
-        logger.info("Instagram 帖子发布成功")
-        return {"success": True, "url": "https://www.instagram.com"}
+        # 等待分享完成 — 轮询检测状态（最长 30s）
+        for attempt in range(15):
+            await page.wait_for_timeout(2000)
+
+            status = await page.evaluate("""() => {
+                const all = document.querySelectorAll('span, div, h2, img[alt]');
+                for (const el of all) {
+                    const t = (el.textContent || el.getAttribute('alt') || '').trim();
+                    // 成功信号
+                    if (t.includes('shared') || t.includes('已分享') ||
+                        t.includes('Your post') || t.includes('你的帖子') ||
+                        t.includes('Your reel') || t.includes('Post shared') ||
+                        t.includes('帖子已分享')) {
+                        return 'success:' + t;
+                    }
+                    // 正在进行中
+                    if (t === '正在分享' || t === 'Sharing' || t === 'Sharing...') {
+                        return 'sharing';
+                    }
+                }
+                // 检查 Share/分享 按钮是否仍可点击（未开始分享）
+                const btns = document.querySelectorAll('div[role="button"], button');
+                for (const btn of btns) {
+                    const t = btn.textContent.trim();
+                    if (t === 'Share' || t === '分享') {
+                        return 'share_visible';
+                    }
+                }
+                // 弹窗可能已关闭（分享完成后回到主页）
+                return 'dialog_closed';
+            }""")
+
+            logger.info("分享状态检测 #%d: %s", attempt + 1, status)
+
+            if status and status.startswith('success:'):
+                logger.info("Instagram 发布成功确认: %s", status)
+                return {"success": True, "url": "https://www.instagram.com"}
+
+            if status == 'sharing':
+                continue  # 仍在上传，继续等
+
+            if status == 'dialog_closed':
+                # 弹窗消失 = 分享完成
+                logger.info("Instagram 发布完成（对话框已关闭）")
+                return {"success": True, "url": "https://www.instagram.com"}
+
+            if status == 'share_visible':
+                # Share 按钮仍在，可能点击没生效
+                if attempt < 5:
+                    continue  # 再等一会
+                break
+
+        # 超时 — 截图调试
+        await page.screenshot(path="/tmp/ig_debug_after_share.png")
+        logger.warning("Instagram 分享超时，截图: /tmp/ig_debug_after_share.png")
+        return {"success": False, "error": "分享超时。截图: /tmp/ig_debug_after_share.png"}
 
     def get_platform_rules(self) -> dict[str, Any]:
         return {

@@ -36,13 +36,11 @@ class XiaohongshuAdapter(BrowserPlatformAdapter):
             tags.append(tag)
 
         body = content.body
-        tag_line = " ".join(tags)
-        formatted_body = f"{body}\n\n{tag_line}"
-
+        # 标签不再追加到正文，通过话题选择 UI 单独插入
         return {
             "platform": "xiaohongshu",
             "title": title,
-            "body": formatted_body,
+            "body": body,
             "body_raw": body,
             "tags": tags,
             "images": content.image_urls[:XHS_MAX_IMAGES],
@@ -112,6 +110,136 @@ class XiaohongshuAdapter(BrowserPlatformAdapter):
                 if (el.textContent.trim() === '{text}') {{ el.click(); break; }}
             }}
         ''')
+
+    async def _insert_linked_tags(self, page, tags: list[str]):
+        """通过推荐话题面板和话题搜索 UI 插入链接标签（蓝色可点击）。
+
+        小红书创作者后台有两种添加话题的方式：
+        1. 推荐话题面板 (recommend-topic-wrapper) 中的 span.tag 元素
+        2. "话题"按钮 (topic-btn) 打开搜索对话框
+        """
+        logger.info("开始插入话题标签: %s", tags)
+
+        inserted = 0
+        remaining = [t.lstrip("#").strip() for t in tags if t.strip()]
+
+        # 策略1: 从推荐话题面板点击匹配项
+        for keyword in remaining[:]:
+            clicked = await page.evaluate("""(keyword) => {
+                const tags = document.querySelectorAll('.recommend-topic-wrapper .tag, .tag-group .tag, [class*="recommend"] span.tag');
+                for (const tag of tags) {
+                    const text = (tag.textContent || '').trim().replace(/^#/, '');
+                    if (text && text.includes(keyword) && text !== '更多') {
+                        tag.click();
+                        return tag.textContent.trim();
+                    }
+                }
+                return null;
+            }""", keyword)
+
+            if clicked:
+                logger.info("推荐话题匹配: %s → %s", keyword, clicked)
+                inserted += 1
+                remaining.remove(keyword)
+                await page.wait_for_timeout(800)
+
+        if not remaining:
+            logger.info("话题标签全部插入完成: %d/%d", inserted, len(tags))
+            return
+
+        # 策略2: 点击"话题"按钮打开搜索对话框
+        topic_btn_clicked = await page.evaluate("""() => {
+            const btns = document.querySelectorAll('button, [role="button"]');
+            for (const btn of btns) {
+                const text = (btn.textContent || '').trim();
+                if (text.includes('话题')) {
+                    btn.click();
+                    return text;
+                }
+            }
+            return null;
+        }""")
+
+        if not topic_btn_clicked:
+            logger.warning("未找到话题按钮，剩余标签跳过: %s", remaining)
+            return
+
+        logger.info("话题按钮已点击: %s", topic_btn_clicked)
+        await page.wait_for_timeout(1500)
+
+        for keyword in remaining[:]:
+            # 查找搜索输入框
+            search_focused = await page.evaluate("""() => {
+                // 话题搜索弹窗中的输入框
+                const inputs = document.querySelectorAll('input[type="text"], input[placeholder*="搜索"], input[placeholder*="话题"]');
+                for (const input of inputs) {
+                    if (input.offsetHeight > 0) {
+                        input.focus();
+                        input.value = '';
+                        input.dispatchEvent(new Event('input', {bubbles: true}));
+                        return true;
+                    }
+                }
+                return false;
+            }""")
+
+            if not search_focused:
+                logger.warning("话题搜索框未找到，跳过: %s", keyword)
+                break
+
+            await page.keyboard.type(keyword, delay=80)
+            await page.wait_for_timeout(1500)
+
+            # 点击搜索结果中的匹配项
+            result_clicked = await page.evaluate("""(keyword) => {
+                // 弹窗中的搜索结果列表
+                const selectors = [
+                    '[class*="topic"] [class*="item"]',
+                    '[class*="topic"] li',
+                    '[class*="search"] [class*="item"]',
+                    '[class*="result"] [class*="item"]',
+                    '[class*="dialog"] li',
+                    '[class*="modal"] li',
+                    'span.tag',
+                ];
+                for (const sel of selectors) {
+                    const items = document.querySelectorAll(sel);
+                    for (const item of items) {
+                        const text = (item.textContent || '').trim();
+                        if (text.includes(keyword) && item.offsetHeight > 0) {
+                            item.click();
+                            return text.substring(0, 40);
+                        }
+                    }
+                }
+                return null;
+            }""", keyword)
+
+            if result_clicked:
+                logger.info("话题搜索匹配: %s → %s", keyword, result_clicked)
+                inserted += 1
+                remaining.remove(keyword)
+                await page.wait_for_timeout(800)
+            else:
+                logger.warning("话题搜索无结果: %s", keyword)
+                # 清空搜索框继续下一个
+                await page.evaluate("""() => {
+                    const inputs = document.querySelectorAll('input[type="text"]');
+                    for (const input of inputs) {
+                        if (input.offsetHeight > 0) {
+                            input.value = '';
+                            input.dispatchEvent(new Event('input', {bubbles: true}));
+                            break;
+                        }
+                    }
+                }""")
+                await page.wait_for_timeout(500)
+
+        # 关闭话题搜索弹窗
+        await page.keyboard.press("Escape")
+        await page.wait_for_timeout(500)
+
+        logger.info("话题标签插入完成: %d/%d", inserted, len(tags))
 
     async def _do_publish(self, page, formatted: dict[str, Any]) -> dict[str, Any]:
         title = formatted["title"]
@@ -183,21 +311,34 @@ class XiaohongshuAdapter(BrowserPlatformAdapter):
 
         await page.wait_for_timeout(500)
 
-        # 输入正文
+        # 输入正文 — 小红书用 TipTap/ProseMirror 编辑器
         body_entered = False
-        try:
-            # 尝试用 placeholder 定位正文区域
-            body_input = page.locator('[placeholder*="正文"], [data-placeholder*="正文"]').first
-            await body_input.wait_for(timeout=3000)
-            await body_input.click()
-            body_entered = True
-        except Exception:
+        for selector in [
+            '.tiptap.ProseMirror',
+            '[contenteditable="true"].ProseMirror',
+            '[placeholder*="正文"], [data-placeholder*="正文"]',
+            '[contenteditable="true"]',
+        ]:
             try:
-                # 备选：最后一个 contenteditable
-                body_input = page.locator('#post-textarea, [contenteditable="true"]').last
-                await body_input.click()
+                body_input = page.locator(selector).first
+                await body_input.wait_for(state="visible", timeout=3000)
+                # 用 JS focus 避免 headless 下 click 超时
+                await body_input.evaluate("el => { el.focus(); el.click(); }")
                 body_entered = True
+                logger.info("正文选择器匹配: %s", selector)
+                break
             except Exception:
+                continue
+        if not body_entered:
+            # 最后手段：用 JS 直接 focus
+            body_entered = await page.evaluate("""() => {
+                const el = document.querySelector('.tiptap.ProseMirror, [contenteditable="true"]');
+                if (el) { el.focus(); el.click(); return true; }
+                return false;
+            }""")
+            if body_entered:
+                logger.info("正文选择器匹配: JS fallback")
+            else:
                 logger.warning("未找到正文输入框")
 
         if body_entered:
@@ -211,10 +352,16 @@ class XiaohongshuAdapter(BrowserPlatformAdapter):
 
         await page.wait_for_timeout(1000)
 
-        # 关闭可能出现的话题建议弹窗
+        # 关闭正文输入可能触发的话题建议弹窗
         await page.keyboard.press("Escape")
         await page.wait_for_timeout(500)
-        # 点击空白区域确保弹窗关闭
+
+        # 插入链接话题标签（蓝色可点击标签）
+        tags = formatted.get("tags", [])
+        if tags:
+            await self._insert_linked_tags(page, tags)
+
+        # 点击空白区域确保所有弹窗关闭
         await page.evaluate("""() => {
             document.body.click();
         }""")
