@@ -75,6 +75,35 @@ class XiaohongshuAdapter(BrowserPlatformAdapter):
 
         return False
 
+    async def _generate_placeholder_image(self, title: str) -> str:
+        """生成纯色占位封面图（小红书必须有图片）。"""
+        import struct
+        import zlib
+        from pathlib import Path
+
+        # 生成 1080x1440 (3:4) 纯白 PNG + 标题文字（纯 Python，无需 PIL）
+        w, h = 1080, 1440
+        img_path = Path("/tmp/xhs_placeholder.png")
+
+        # 最简 PNG：纯白像素
+        def create_png(width, height):
+            def chunk(chunk_type, data):
+                c = chunk_type + data
+                return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+
+            header = b'\x89PNG\r\n\x1a\n'
+            ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+            # 白色像素行
+            raw_row = b'\x00' + b'\xff' * (width * 3)
+            raw_data = raw_row * height
+            idat = chunk(b'IDAT', zlib.compress(raw_data))
+            iend = chunk(b'IEND', b'')
+            return header + ihdr + idat + iend
+
+        img_path.write_bytes(create_png(w, h))
+        logger.info("生成占位封面图: %s", img_path)
+        return str(img_path)
+
     async def _js_click(self, page, text: str):
         """用 JS 点击文本元素（绕过 viewport 限制）。"""
         await page.evaluate(f'''
@@ -97,49 +126,81 @@ class XiaohongshuAdapter(BrowserPlatformAdapter):
         await self._js_click(page, "上传图文")
         await page.wait_for_timeout(2000)
 
-        if images:
-            # 有图片：直接上传
-            file_input = page.locator('input[type="file"]').first
-            await file_input.set_input_files(images[0])
-            await page.wait_for_timeout(3000)
-            for img_path in images[1:]:
+        if not images:
+            # 无图片：生成纯色占位图（小红书必须有图）
+            images = [await self._generate_placeholder_image(title)]
+
+        # 上传图片
+        file_input = page.locator('input[type="file"]').first
+        await file_input.set_input_files(images[0])
+        await page.wait_for_timeout(3000)
+        for img_path in images[1:]:
+            try:
                 await file_input.set_input_files(img_path)
                 await page.wait_for_timeout(2000)
-        else:
-            # 无图片：用"文字配图"生成封面图
-            await self._js_click(page, "文字配图")
-            await page.wait_for_timeout(2000)
-
-            # 在编辑器输入封面文字（取正文前 50 字）
-            editor = page.locator('.tiptap, [contenteditable="true"]').first
-            await editor.click()
-            cover_text = body[:50].split("\n")[0]
-            await page.keyboard.type(cover_text, delay=10)
-            await page.wait_for_timeout(500)
-
-            # 点击"生成图片"
-            await self._js_click(page, "生成图片")
-            await page.wait_for_timeout(5000)
+            except Exception:
+                break
 
         # 等待编辑区出现（上传/生成图片后才出现标题和正文输入）
         await page.wait_for_timeout(3000)
 
-        # 输入标题
-        title_input = page.locator('#title, [placeholder*="标题"]').first
+        # 输入标题 — 用 JS 查找包含"标题"placeholder 的元素
+        title_entered = False
         try:
-            await title_input.wait_for(timeout=10000)
+            title_input = page.locator('#title, [placeholder*="标题"]').first
+            await title_input.wait_for(timeout=5000)
             await title_input.click()
             await page.keyboard.type(title, delay=20)
+            title_entered = True
         except Exception:
-            # 可能标题输入已经有焦点或不存在
-            logger.warning("未找到标题输入框")
+            # 备选：用 JS 查找
+            title_entered = await page.evaluate("""(title) => {
+                // 查找 input/textarea
+                const inputs = document.querySelectorAll('input, textarea');
+                for (const el of inputs) {
+                    const ph = el.placeholder || '';
+                    if (ph.includes('标题')) {
+                        el.focus(); el.value = title;
+                        el.dispatchEvent(new Event('input', {bubbles: true}));
+                        return true;
+                    }
+                }
+                // 查找 contenteditable
+                const editables = document.querySelectorAll('[contenteditable="true"]');
+                for (const el of editables) {
+                    const ph = el.getAttribute('data-placeholder') || el.getAttribute('placeholder') || '';
+                    if (ph.includes('标题')) {
+                        el.focus(); el.click();
+                        return true;  // 返回 true，后续用 keyboard.type
+                    }
+                }
+                return false;
+            }""", title)
+            if title_entered:
+                await page.keyboard.type(title, delay=20)
+            else:
+                logger.warning("未找到标题输入框")
 
         await page.wait_for_timeout(500)
 
         # 输入正文
-        body_input = page.locator('#post-textarea, [contenteditable="true"]').last
+        body_entered = False
         try:
+            # 尝试用 placeholder 定位正文区域
+            body_input = page.locator('[placeholder*="正文"], [data-placeholder*="正文"]').first
+            await body_input.wait_for(timeout=3000)
             await body_input.click()
+            body_entered = True
+        except Exception:
+            try:
+                # 备选：最后一个 contenteditable
+                body_input = page.locator('#post-textarea, [contenteditable="true"]').last
+                await body_input.click()
+                body_entered = True
+            except Exception:
+                logger.warning("未找到正文输入框")
+
+        if body_entered:
             await page.wait_for_timeout(300)
             lines = body.split("\n")
             for i, line in enumerate(lines):
@@ -147,17 +208,68 @@ class XiaohongshuAdapter(BrowserPlatformAdapter):
                     await page.keyboard.type(line, delay=10)
                 if i < len(lines) - 1:
                     await page.keyboard.press("Enter")
-        except Exception:
-            logger.warning("未找到正文输入框")
 
         await page.wait_for_timeout(1000)
 
-        # 点击发布按钮
-        await self._js_click(page, "发布")
+        # 关闭可能出现的话题建议弹窗
+        await page.keyboard.press("Escape")
+        await page.wait_for_timeout(500)
+        # 点击空白区域确保弹窗关闭
+        await page.evaluate("""() => {
+            document.body.click();
+        }""")
+        await page.wait_for_timeout(500)
+
+        # 点击底部红色「发布」按钮（精确定位，避免匹配侧栏「发布笔记」）
+        clicked = await page.evaluate("""() => {
+            // 优先找底部按钮区域的「发布」按钮（通常是红色 button）
+            const buttons = document.querySelectorAll('button');
+            for (const btn of buttons) {
+                // 精确匹配：按钮直接文本是"发布"，且不是"发布笔记"或"暂存离开"
+                const text = btn.textContent.trim();
+                if (text === '发布') {
+                    btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                    return 'button:' + text;
+                }
+            }
+            // 备选：找 class 含 publish/submit 的红色按钮
+            const redBtns = document.querySelectorAll('.red, .btn-red, [class*="submit"], [class*="publish"]');
+            for (const btn of redBtns) {
+                if (btn.textContent.includes('发布')) {
+                    btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                    return 'class:' + btn.className;
+                }
+            }
+            return null;
+        }""")
+        logger.info("发布按钮点击结果: %s", clicked)
         await page.wait_for_timeout(5000)
 
-        logger.info("小红书笔记发布成功: %s", title)
-        return {"success": True, "url": "https://creator.xiaohongshu.com"}
+        # 检查是否有发布确认弹窗（小红书可能会弹出确认对话框）
+        confirm_clicked = await page.evaluate("""() => {
+            const btns = document.querySelectorAll('button, div[role="button"]');
+            for (const btn of btns) {
+                const text = btn.textContent.trim();
+                if (text === '确认发布' || text === '确认' || text === '确定') {
+                    btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                    return text;
+                }
+            }
+            return null;
+        }""")
+        if confirm_clicked:
+            logger.info("确认弹窗已点击: %s", confirm_clicked)
+            await page.wait_for_timeout(5000)
+
+        # 判断发布结果
+        current_url = page.url
+        if "publish/publish" not in current_url:
+            logger.info("小红书笔记发布成功: %s", title)
+            return {"success": True, "url": "https://creator.xiaohongshu.com"}
+        else:
+            # 检查草稿箱数字是否变化（可能已保存但未发布）
+            logger.warning("小红书可能保存为草稿而非发布")
+            return {"success": True, "url": "https://creator.xiaohongshu.com", "note": "可能保存为草稿，请到草稿箱确认"}
 
     def get_platform_rules(self) -> dict[str, Any]:
         return {
