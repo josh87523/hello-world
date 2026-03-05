@@ -95,6 +95,7 @@ class ScraperConfig:
     max_notes_per_user: int = 50
     data_dir: str = "data/scraper"
     benchmark_file: str = "data/benchmark.json"
+    topic_bank_file: str = "data/topic_bank.json"
 
     @classmethod
     def from_env(cls) -> ScraperConfig:
@@ -105,6 +106,7 @@ class ScraperConfig:
             max_notes_per_user=int(os.getenv("XHS_MAX_USER_NOTES", "50")),
             data_dir=os.getenv("XHS_DATA_DIR", cls.data_dir),
             benchmark_file=os.getenv("BENCHMARK_FILE", cls.benchmark_file),
+            topic_bank_file=os.getenv("TOPIC_BANK_FILE", cls.topic_bank_file),
         )
 
     @property

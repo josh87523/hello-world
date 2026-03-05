@@ -8,6 +8,7 @@ from typing import Any
 from ai.client import AIClient
 from core.pipeline import Pipeline
 from models.content import ContentFinal, Platform
+from modules.topic_bank import TopicBank
 
 logger = logging.getLogger(__name__)
 
@@ -15,24 +16,20 @@ logger = logging.getLogger(__name__)
 class ContentWorkflow:
     """Orchestrates the full content creation workflow.
 
-    Enhanced with:
-    - Matrix account persona injection (tone, vertical, domains)
-    - Cover strategy variant generation
-    - Analytics tracking integration
+    Supports two modes:
+    - recreation (default): 从选题库挑爆款笔记 → 二创改写
+    - original: AI 原创选题 → 从零生成（旧流程）
 
     Usage:
-        # Single account mode
+        # 二创模式（默认）
         workflow = ContentWorkflow(ai_client=client, platform=Platform.XIAOHONGSHU)
-        results = workflow.run(domains=["ai", "创业"], count=3)
+        results = workflow.run(domains=["ai"], count=1)
 
-        # Matrix mode (with account persona)
-        results = workflow.run(
-            domains=["ai工具", "效率"],
-            count=2,
-            account_tone="极客+接地气",
-            account_vertical="ai_tools",
-            account_id="matrix_01",
-        )
+        # 原创模式
+        results = workflow.run(domains=["ai"], count=1, mode="original")
+
+        # 带人工指导的二创
+        results = workflow.run(domains=["ai"], recreation_guidance="重点突出效率提升")
     """
 
     def __init__(
@@ -41,27 +38,42 @@ class ContentWorkflow:
         platform: Platform = Platform.XIAOHONGSHU,
         feishu_client: Any | None = None,
         cover_variants: int = 3,
+        topic_bank: TopicBank | None = None,
     ):
         self.ai = ai_client
         self.platform = platform
         self.feishu = feishu_client
         self.cover_variants = cover_variants
+        self.topic_bank = topic_bank or TopicBank()
 
-    def build_pipeline(self, include_cover: bool = True) -> Pipeline:
-        """Build the full content pipeline with all steps.
+    def build_pipeline(
+        self, include_cover: bool = True, mode: str = "recreation"
+    ) -> Pipeline:
+        """Build content pipeline.
 
         Args:
             include_cover: Whether to include cover variant generation step.
+            mode: "recreation" (二创) or "original" (AI原创).
         """
-        from modules.content_generator import ContentGenerationStep
         from modules.content_optimizer import ContentOptimizationStep
         from modules.cover_strategy import CoverStrategyStep
         from modules.quality_checker import QualityCheckStep
-        from modules.topic_research import TopicResearchStep
 
-        pipeline = Pipeline(name=f"content-{self.platform.value}")
-        pipeline.add_step(TopicResearchStep(self.ai))
-        pipeline.add_step(ContentGenerationStep(self.ai))
+        if mode == "recreation":
+            from modules.content_recreation import ContentRecreationStep
+            from modules.topic_selection import TopicSelectionStep
+
+            pipeline = Pipeline(name=f"recreation-{self.platform.value}")
+            pipeline.add_step(TopicSelectionStep(self.topic_bank))
+            pipeline.add_step(ContentRecreationStep(self.ai))
+        else:
+            from modules.content_generator import ContentGenerationStep
+            from modules.topic_research import TopicResearchStep
+
+            pipeline = Pipeline(name=f"content-{self.platform.value}")
+            pipeline.add_step(TopicResearchStep(self.ai))
+            pipeline.add_step(ContentGenerationStep(self.ai))
+
         pipeline.add_step(ContentOptimizationStep(self.ai))
         if include_cover:
             pipeline.add_step(CoverStrategyStep(self.ai, self.cover_variants))
@@ -78,6 +90,8 @@ class ContentWorkflow:
         account_vertical: str = "通用",
         account_id: str = "",
         competitor_context: str = "",
+        mode: str = "recreation",
+        recreation_guidance: str = "",
     ) -> list[dict[str, Any]]:
         """Run the full workflow and return results.
 
@@ -89,6 +103,8 @@ class ContentWorkflow:
             account_vertical: Content vertical for this account.
             account_id: Matrix account identifier.
             competitor_context: Benchmark data text to inform topic selection.
+            mode: "recreation" (二创) or "original" (AI原创).
+            recreation_guidance: 人工改写指导（仅二创模式有效）.
 
         Returns:
             List of pipeline result dicts.
@@ -98,11 +114,11 @@ class ContentWorkflow:
 
         for i in range(count):
             logger.info(
-                "Generating content %d/%d (account=%s, vertical=%s)",
+                "Generating content %d/%d (mode=%s, account=%s)",
                 i + 1,
                 count,
+                mode,
                 account_id or "default",
-                account_vertical,
             )
 
             context = {
@@ -114,9 +130,10 @@ class ContentWorkflow:
                 "account_vertical": account_vertical,
                 "account_id": account_id,
                 "competitor_context": competitor_context,
+                "recreation_guidance": recreation_guidance,
             }
 
-            pipeline = self.build_pipeline()
+            pipeline = self.build_pipeline(mode=mode)
             result = pipeline.run(context)
 
             # Push to Feishu if available

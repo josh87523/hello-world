@@ -101,9 +101,13 @@ class TwitterAdapter(BrowserPlatformAdapter):
                 await file_input.set_input_files(img_path)
                 await page.wait_for_timeout(2000)
 
-        # 点击发送按钮（对话框内的，force 绕过 overlay 遮挡）
-        post_btn = page.locator('[data-testid="tweetButton"]').first
-        await post_btn.click(force=True)
+        # 点击发送按钮（用 JS dispatchEvent 绕过 overlay 并触发 React 事件）
+        await page.evaluate("""() => {
+            const btn = document.querySelector('[data-testid="tweetButton"]');
+            if (btn) {
+                btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+            }
+        }""")
         await page.wait_for_timeout(3000)
 
         # 验证发送成功（compose 对话框消失）

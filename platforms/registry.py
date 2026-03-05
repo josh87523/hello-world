@@ -50,12 +50,14 @@ def _register_defaults():
     from platforms.jike import JikeAdapter
     from platforms.threads import ThreadsAdapter
     from platforms.instagram import InstagramAdapter
+    from platforms.wechat_oa import WechatOAAdapter
 
     PlatformRegistry.register(XiaohongshuAdapter)
     PlatformRegistry.register(TwitterAdapter)
     PlatformRegistry.register(JikeAdapter)
     PlatformRegistry.register(ThreadsAdapter)
     PlatformRegistry.register(InstagramAdapter)
+    PlatformRegistry.register(WechatOAAdapter)
 
 
 _register_defaults()

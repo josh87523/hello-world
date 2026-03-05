@@ -145,6 +145,44 @@ _MOCK_QUALITY = {
     "pass": True,
 }
 
+_MOCK_RECREATION = {
+    "title": "🤖 用AI写代码的程序员，正在悄悄甩开同事",
+    "body": (
+        "说个真事。\n\n"
+        "我组里一个同事，上个月开始偷偷用Cursor写代码。\n"
+        "结果呢？产出直接翻倍，leader都懵了。\n\n"
+        "🔥 这不是个例，是趋势\n\n"
+        "我问了身边十几个程序员朋友：\n"
+        "• 8个已经在用AI写代码\n"
+        "• 3个在观望\n"
+        "• 只有1个坚决不用\n"
+        "猜猜谁最近被优化了？\n\n"
+        "📊 说几个扎心的数据\n\n"
+        "用AI的程序员平均节省**40%编码时间**\n"
+        "不用AI的，加班时长反而增加了20%\n"
+        "差距不是在缩小，是在加速拉大\n\n"
+        "💡 我自己的真实体验\n\n"
+        "一开始我也抵触，觉得AI写的代码不靠谱。\n"
+        "后来试了一周Cursor + Claude——\n"
+        "emmm，真香。\n\n"
+        "最明显的变化：以前写个CRUD要半天，现在20分钟搞定。\n"
+        "省下的时间去做架构设计，反而涨了薪。\n\n"
+        "✅ 三个建议给还在犹豫的你\n\n"
+        "1. 先别想太多，装个Cursor用一周再说\n"
+        "2. 从简单任务开始，写测试用例、写文档\n"
+        "3. 慢慢过渡到核心业务代码\n\n"
+        "说实话，AI不会替代程序员。\n"
+        "但会用AI的那个人，会拿到你的offer。\n\n"
+        "你们团队用AI了吗？评论区聊聊 👇\n\n"
+        "先收藏再慢慢看，以后一定用得上 📌"
+    ),
+    "tags": ["#AI编程", "#程序员", "#Cursor", "#效率提升", "#职场", "#Claude", "#程序员日常", "#转型"],
+    "cover_image_prompt": "Split illustration: left side frustrated programmer with messy desk, right side confident programmer with AI holographic assistant, modern flat design, purple and orange gradient",
+    "image_prompts": ["Bar chart comparing productivity with and without AI coding tools"],
+    "save_hook": "先收藏再慢慢看，以后一定用得上",
+    "recreation_analysis": "原文用真实裁员案例制造焦虑+数据佐证+行动方案，二创保留结构但换成同事视角，更接地气",
+}
+
 
 class MockAIClient:
     """Mock AI client that returns pre-built responses for testing."""
@@ -152,6 +190,12 @@ class MockAIClient:
     def __init__(self):
         self.call_count = 0
         self.model = "mock-claude"
+        self._mode = "original"  # or "recreation"
+
+    def set_mode(self, mode: str) -> None:
+        """Set mock response mode: 'original' or 'recreation'."""
+        self._mode = mode
+        self.call_count = 0
 
     def chat(self, prompt: str, system: str = "", **kwargs) -> str:
         self.call_count += 1
@@ -160,12 +204,18 @@ class MockAIClient:
 
     def chat_json(self, prompt: str, system: str = "", **kwargs) -> dict[str, Any] | list[Any]:
         self.call_count += 1
-        # Pipeline always calls in fixed order:
-        # 1=topics, 2=refinement, 3=content, 4=optimization, 5=quality
-        responses = [_MOCK_TOPICS, _MOCK_REFINEMENT, _MOCK_CONTENT, _MOCK_OPTIMIZATION, _MOCK_QUALITY]
+
+        if self._mode == "recreation":
+            # Recreation pipeline: 1=recreation, 2=optimization, 3=cover, 4=quality
+            responses = [_MOCK_RECREATION, _MOCK_OPTIMIZATION, _MOCK_CONTENT, _MOCK_QUALITY]
+            labels = ["recreation", "optimization", "cover", "quality"]
+        else:
+            # Original pipeline: 1=topics, 2=refinement, 3=content, 4=optimization, 5=quality
+            responses = [_MOCK_TOPICS, _MOCK_REFINEMENT, _MOCK_CONTENT, _MOCK_OPTIMIZATION, _MOCK_QUALITY]
+            labels = ["topics", "refinement", "content", "optimization", "quality"]
+
         idx = (self.call_count - 1) % len(responses)
-        label = ["topics", "refinement", "content", "optimization", "quality"][idx]
-        logger.info("[MockAI] chat_json call #%d → %s", self.call_count, label)
+        logger.info("[MockAI] chat_json call #%d → %s", self.call_count, labels[idx])
         return responses[idx]
 
     def chat_messages(self, messages: list[dict[str, str]], **kwargs) -> str:
