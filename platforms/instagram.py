@@ -68,7 +68,7 @@ class InstagramAdapter(BrowserPlatformAdapter):
             return {"success": False, "error": "Instagram 必须有图片"}
 
         # 点击创建帖子
-        create_btn = page.locator('[aria-label="New post"], [aria-label="新帖子"]').first
+        create_btn = page.locator('[aria-label="New post"], [aria-label="新帖子"], [aria-label="新貼文"]').first
         await create_btn.click()
         await page.wait_for_timeout(2000)
 
@@ -89,18 +89,44 @@ class InstagramAdapter(BrowserPlatformAdapter):
             except Exception:
                 break
 
-        # 点 Next（跳过滤镜）
-        for _ in range(2):
-            try:
-                next_btn = page.locator('div[role="button"]:has-text("Next"), button:has-text("Next"), button:has-text("下一步")').first
-                await next_btn.click()
-                await page.wait_for_timeout(2000)
-            except Exception:
-                break
+        # 点 Next/继续（跳过裁剪和滤镜，需要点两次）
+        for i in range(2):
+            clicked = await page.evaluate("""() => {
+                const btns = document.querySelectorAll('div[role="button"], button, span');
+                for (const btn of btns) {
+                    const text = btn.textContent.trim();
+                    if (text === 'Next' || text === '下一步' || text === '继续' || text === '下一個' || text === '繼續') {
+                        btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                        return text;
+                    }
+                }
+                return null;
+            }""")
+            logger.info("Next 按钮 #%d: %s", i+1, clicked)
+            await page.wait_for_timeout(2000)
 
-        # 输入 caption
-        caption_input = page.locator('[aria-label="Write a caption..."], [aria-label="写说明..."]').first
-        await caption_input.click()
+        # 输入 caption（尝试多种选择器）
+        caption_found = False
+        for selector in [
+            '[aria-label="Write a caption..."]',
+            '[aria-label="写说明..."]',
+            '[aria-label="撰寫說明..."]',
+            '[contenteditable="true"]',
+            'textarea',
+        ]:
+            try:
+                caption_input = page.locator(selector).first
+                await caption_input.click(timeout=3000)
+                caption_found = True
+                logger.info("Caption 选择器匹配: %s", selector)
+                break
+            except Exception:
+                continue
+
+        if not caption_found:
+            await page.screenshot(path="/tmp/ig_debug_caption_fail.png")
+            return {"success": False, "error": "未找到 caption 输入框"}
+
         await page.wait_for_timeout(500)
 
         lines = body.split("\n")
