@@ -4,6 +4,15 @@
 支持矩阵号运营、对标分析、数据爬取、封面策略与迭代优化。
 
 Usage:
+    # 多平台发布（从 JSON 文件读取内容）
+    python main.py publish --file content.json
+    python main.py publish --file content.json --dry-run
+    python main.py publish --file content.json --platforms twitter,jike
+
+    # 平台登录（首次使用需手动登录保存 session）
+    python main.py login --platform twitter
+    python main.py login --all
+
     # 单次生成
     python main.py run
 
@@ -51,6 +60,7 @@ from models.content import Platform
 from modules.analytics_tracker import AnalyticsTracker, ContentRecord
 from modules.competitor_analyzer import CompetitorAnalyzer
 from modules.matrix_manager import MatrixManager
+from modules.topic_bank import TopicBank
 from modules.xhs_scraper import ScraperConfig as XhsScraperConfig, XhsScraper
 
 logging.basicConfig(
@@ -72,9 +82,15 @@ def build_ai_client(config: AppConfig, dry_run: bool = False) -> AIClient:
     return AIClient(api_key=config.ai.api_key, model=config.ai.model)
 
 
-def build_workflow(config: AppConfig, dry_run: bool = False) -> ContentWorkflow:
+def build_workflow(
+    config: AppConfig, dry_run: bool = False, mode: str = "recreation"
+) -> ContentWorkflow:
     """Build the workflow from configuration."""
     ai_client = build_ai_client(config, dry_run)
+
+    # Set mock mode for correct response sequence
+    if dry_run and hasattr(ai_client, "set_mode"):
+        ai_client.set_mode(mode)
 
     feishu_client = None
     if config.feishu.is_configured:
@@ -85,23 +101,28 @@ def build_workflow(config: AppConfig, dry_run: bool = False) -> ContentWorkflow:
         )
 
     platform = PLATFORM_MAP.get(config.workflow.platform, Platform.XIAOHONGSHU)
+    topic_bank = TopicBank(bank_file=config.scraper.topic_bank_file)
 
     return ContentWorkflow(
         ai_client=ai_client,
         platform=platform,
         feishu_client=feishu_client,
         cover_variants=config.matrix.cover_variants,
+        topic_bank=topic_bank,
     )
 
 
 def cmd_run(args: argparse.Namespace, config: AppConfig) -> None:
     """Run the content workflow once."""
-    workflow = build_workflow(config, dry_run=args.dry_run)
+    mode = getattr(args, "mode", "recreation")
+    workflow = build_workflow(config, dry_run=args.dry_run, mode=mode)
 
     results = workflow.run(
         domains=config.workflow.domains,
         count=args.count,
         custom_topic=args.topic,
+        mode=mode,
+        recreation_guidance=getattr(args, "guidance", "") or "",
     )
 
     _print_results(results, json_output=args.json)
@@ -115,9 +136,13 @@ def cmd_matrix(args: argparse.Namespace, config: AppConfig) -> None:
         _print_matrix_status(manager)
         return
 
+    mode = getattr(args, "mode", "recreation")
     ai_client = build_ai_client(config, dry_run=args.dry_run)
+    if hasattr(ai_client, "set_mode"):
+        ai_client.set_mode(mode)
     platform = PLATFORM_MAP.get(config.workflow.platform, Platform.XIAOHONGSHU)
     tracker = AnalyticsTracker(data_file=config.matrix.analytics_file)
+    topic_bank = TopicBank(bank_file=config.scraper.topic_bank_file)
 
     feishu_client = None
     if config.feishu.is_configured:
@@ -156,6 +181,7 @@ def cmd_matrix(args: argparse.Namespace, config: AppConfig) -> None:
             platform=platform,
             feishu_client=feishu_client,
             cover_variants=config.matrix.cover_variants,
+            topic_bank=topic_bank,
         )
 
         count = args.count if args.count else account.daily_count
@@ -165,6 +191,8 @@ def cmd_matrix(args: argparse.Namespace, config: AppConfig) -> None:
             account_tone=account.tone,
             account_vertical=account.vertical,
             account_id=account.account_id,
+            mode=mode,
+            recreation_guidance=getattr(args, "guidance", "") or "",
         )
 
         for result in results:
@@ -546,6 +574,196 @@ def _print_competitor(comp) -> None:
         print(f"    Last scraped: {comp.last_scraped[:19]}")
 
 
+def cmd_ingest(args: argparse.Namespace, config: AppConfig) -> None:
+    """将对标笔记导入选题库。"""
+    topic_bank = TopicBank(bank_file=config.scraper.topic_bank_file)
+
+    if args.status:
+        stats = topic_bank.get_stats()
+        print(f"\n选题库状态:")
+        print(f"  总数: {stats['total']}")
+        print(f"  未用: {stats['unused']}")
+        print(f"  已用: {stats['used']}")
+        print(f"  来源: {', '.join(stats['sources']) if stats['sources'] else '无'}")
+        return
+
+    if args.from_benchmark:
+        analyzer = CompetitorAnalyzer(data_file=config.scraper.benchmark_file)
+        total = 0
+        for user_id, notes in analyzer.all_notes.items():
+            added = topic_bank.ingest_from_competitor(user_id, notes)
+            total += added
+            if added:
+                print(f"  {user_id}: +{added} 条")
+        print(f"\n从 benchmark 导入 {total} 条选题到选题库")
+        return
+
+    if args.from_file:
+        scraper_cfg = XhsScraperConfig(data_dir=config.scraper.data_dir)
+        scraper = XhsScraper(scraper_cfg)
+        notes = scraper.import_from_file(args.from_file)
+        if notes:
+            added = topic_bank.ingest_from_scraper(notes, source=args.from_file)
+            print(f"从文件导入 {added} 条选题到选题库")
+        else:
+            print("导入失败，检查文件格式")
+        return
+
+    # Online scraping
+    if not config.scraper.is_configured:
+        print("Error: XHS_COOKIE not set. Use --from-benchmark, --from-file, or set XHS_COOKIE.")
+        sys.exit(1)
+
+    scraper_cfg = XhsScraperConfig(
+        cookie=config.scraper.cookie,
+        rate_limit=config.scraper.rate_limit,
+        data_dir=config.scraper.data_dir,
+    )
+    scraper = XhsScraper(scraper_cfg)
+
+    if args.user:
+        notes = scraper.scrape_user_notes(args.user, count=args.count or 50)
+        added = topic_bank.ingest_from_competitor(args.user, notes)
+        print(f"爬取 {len(notes)} 条，新增 {added} 条到选题库")
+    elif args.keyword:
+        notes = scraper.search_notes(args.keyword, count=args.count or 40)
+        added = topic_bank.ingest_from_scraper(notes, source=args.keyword)
+        print(f"搜索到 {len(notes)} 条，新增 {added} 条到选题库")
+    else:
+        print("指定 --user, --keyword, --from-benchmark, --from-file, 或 --status")
+
+    scraper.close()
+
+
+def cmd_publish(args: argparse.Namespace, config: AppConfig) -> None:
+    """多平台发布。"""
+    from core.multi_publish import MultiPlatformPublisher, load_content_json
+
+    if not args.file:
+        print("Error: 需要 --file 指定内容 JSON 文件。")
+        print("JSON 格式示例：")
+        print(json.dumps({
+            "twitter": {"title": "", "body": "内容...", "tags": ["tag1"]},
+            "jike": {"title": "", "body": "内容...", "tags": []},
+        }, ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    contents = load_content_json(args.file)
+
+    # 过滤平台
+    if args.platforms:
+        selected = set(args.platforms.split(","))
+        contents = {k: v for k, v in contents.items() if k in selected}
+
+    if not contents:
+        print("没有要发布的内容。")
+        return
+
+    print(f"准备发布到 {len(contents)} 个平台: {', '.join(contents.keys())}")
+
+    publisher = MultiPlatformPublisher()
+    results = publisher.publish_all(contents, dry_run=args.dry_run)
+    publisher.print_results(results)
+
+
+def cmd_login(args: argparse.Namespace, config: AppConfig) -> None:
+    """平台登录（headed 模式，用户手动登录保存 session）。"""
+    import asyncio
+
+    available = {
+        "twitter": ("https://x.com/login", "x.com"),
+        "threads": ("https://www.threads.net/login", "threads.com"),
+        "instagram": ("https://www.instagram.com/accounts/login/", "instagram.com"),
+        "xiaohongshu": ("https://creator.xiaohongshu.com/login", "creator.xiaohongshu.com"),
+        "jike": ("https://web.okjike.com/", "web.okjike.com"),
+        "wechat": ("https://mp.weixin.qq.com/", "mp.weixin.qq.com"),
+    }
+
+    if args.platform == "all":
+        platforms = list(available.keys())
+    elif args.platform in available:
+        platforms = [args.platform]
+    else:
+        print(f"未知平台: {args.platform}")
+        print(f"可选: {', '.join(available.keys())}, all")
+        return
+
+    # 登录成功后的目标 URL 特征
+    login_success_patterns = {
+        "twitter": ["/home", "/compose"],
+        "threads": ["threads.com/@", "threads.com/home", "threads.net/@"],
+        "instagram": [],  # URL 不变，用元素检测
+        "xiaohongshu": ["creator.xiaohongshu.com/creator", "creator.xiaohongshu.com/publish"],
+        "jike": [],  # URL 不变，用元素检测
+        "wechat": ["mp.weixin.qq.com/cgi-bin"],
+    }
+
+    # 登录成功的 DOM 元素选择器（URL 检测不适用的平台）
+    login_success_selectors = {
+        "jike": '[class*="NavigationBar"], [class*="avatar"], [class*="UserAvatar"]',
+        "instagram": '[aria-label="New post"], [aria-label="新帖子"], [aria-label="Home"], [aria-label="首页"]',
+    }
+
+    async def _login(platform_name: str):
+        from pathlib import Path
+        from platforms.browser_base import launch_chrome_cdp, close_chrome_cdp
+
+        url, domain = available[platform_name]
+        profile_dir = Path(__file__).parent / "profiles" / platform_name
+
+        print(f"\n登录 {platform_name} ({domain})...")
+        print(f"  Profile: {profile_dir}")
+
+        pw, browser, ctx, proc = await launch_chrome_cdp(
+            profile_dir=str(profile_dir),
+            headless=False,
+        )
+
+        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+        print(f"  请在浏览器中完成登录...")
+        print(f"  等待登录完成（最多 180 秒）...", flush=True)
+
+        patterns = login_success_patterns.get(platform_name, [])
+        selectors = login_success_selectors.get(platform_name)
+        for _ in range(180):
+            await asyncio.sleep(1)
+            try:
+                current_url = page.url
+            except Exception:
+                break
+            # 元素检测（优先，适用于 URL 不变的平台）
+            if selectors:
+                try:
+                    el = await page.query_selector(selectors)
+                    if el:
+                        print(f"  检测到登录成功（元素匹配）")
+                        break
+                except Exception:
+                    pass
+            # URL 检测
+            elif patterns:
+                if any(p in current_url for p in patterns):
+                    if "login" not in current_url and "flow" not in current_url:
+                        print(f"  检测到登录成功: {current_url[:60]}")
+                        break
+            elif "login" not in current_url and "flow" not in current_url and "accounts" not in current_url:
+                print(f"  检测到页面变化: {current_url[:60]}")
+                break
+        else:
+            print(f"  超时，保存当前状态")
+
+        await asyncio.sleep(3)
+        await close_chrome_cdp(pw, browser, proc)
+        print(f"  {platform_name} session 已保存到 {profile_dir}")
+
+    for p in platforms:
+        asyncio.run(_login(p))
+
+    print(f"\n登录完成。Session 保存在 profiles/ 目录。")
+
+
 def cmd_schedule(args: argparse.Namespace, config: AppConfig) -> None:
     """Start the scheduler for daily content generation."""
     workflow = build_workflow(config)
@@ -667,6 +885,11 @@ def main():
     run_parser = subparsers.add_parser("run", help="单次内容生成")
     run_parser.add_argument("--topic", "-t", help="指定话题")
     run_parser.add_argument("--count", "-n", type=int, default=1, help="生成篇数")
+    run_parser.add_argument(
+        "--mode", "-m", choices=["recreation", "original"],
+        default="recreation", help="生成模式: recreation(二创) / original(AI原创)"
+    )
+    run_parser.add_argument("--guidance", "-g", help="人工改写指导（仅二创模式）")
     run_parser.add_argument("--json", action="store_true", help="输出JSON格式")
     run_parser.add_argument(
         "--dry-run", action="store_true", help="使用模拟数据测试"
@@ -678,6 +901,11 @@ def main():
         "--account", "-a", help="指定账号ID（不指定则全部活跃账号）"
     )
     matrix_parser.add_argument("--count", "-n", type=int, help="每账号生成篇数（默认按账号配置）")
+    matrix_parser.add_argument(
+        "--mode", choices=["recreation", "original"],
+        default="recreation", help="生成模式"
+    )
+    matrix_parser.add_argument("--guidance", "-g", help="人工改写指导")
     matrix_parser.add_argument("--status", action="store_true", help="查看矩阵状态")
     matrix_parser.add_argument("--json", action="store_true", help="输出JSON格式")
     matrix_parser.add_argument(
@@ -719,6 +947,26 @@ def main():
     bench_parser.add_argument("--count", "-n", type=int, help="爬取笔记数量")
     bench_parser.add_argument("--json", action="store_true", help="输出JSON格式")
 
+    # ingest: import notes to topic bank
+    ingest_parser = subparsers.add_parser("ingest", help="导入选题到选题库")
+    ingest_parser.add_argument("--from-benchmark", action="store_true", help="从 benchmark 数据导入")
+    ingest_parser.add_argument("--from-file", help="从 JSON 文件导入")
+    ingest_parser.add_argument("--user", "-u", help="爬取指定用户笔记并导入")
+    ingest_parser.add_argument("--keyword", "-k", help="按关键词搜索并导入")
+    ingest_parser.add_argument("--count", "-n", type=int, help="最大爬取数量")
+    ingest_parser.add_argument("--status", action="store_true", help="查看选题库状态")
+
+    # publish: multi-platform publishing
+    publish_parser = subparsers.add_parser("publish", help="多平台发布")
+    publish_parser.add_argument("--file", "-f", help="内容 JSON 文件路径")
+    publish_parser.add_argument("--platforms", "-p", help="指定平台（逗号分隔，如 twitter,jike）")
+    publish_parser.add_argument("--dry-run", action="store_true", help="只校验不发布")
+
+    # login: platform login
+    login_parser = subparsers.add_parser("login", help="平台登录（保存 session）")
+    login_parser.add_argument("--platform", "-p", required=True,
+                              help="平台名称（twitter/threads/instagram/xiaohongshu/jike/wechat/all）")
+
     # schedule: daily automation
     subparsers.add_parser("schedule", help="启动定时任务模式")
 
@@ -731,6 +979,9 @@ def main():
         or args.command == "analytics"
         or args.command == "scrape"
         or args.command == "benchmark"
+        or args.command == "ingest"
+        or args.command == "publish"
+        or args.command == "login"
     )
     needs_api = args.command in ("run", "matrix", "schedule") and not is_info_only
     if needs_api and not config.ai.api_key and not is_dry_run:
@@ -746,6 +997,9 @@ def main():
         "analytics": cmd_analytics,
         "scrape": cmd_scrape,
         "benchmark": cmd_benchmark,
+        "ingest": cmd_ingest,
+        "publish": cmd_publish,
+        "login": cmd_login,
         "schedule": cmd_schedule,
     }
 

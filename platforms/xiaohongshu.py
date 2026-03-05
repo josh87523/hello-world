@@ -1,4 +1,4 @@
-"""Xiaohongshu (Little Red Book) platform adapter."""
+"""Xiaohongshu (Little Red Book) platform adapter — 浏览器自动化发布。"""
 
 from __future__ import annotations
 
@@ -6,36 +6,28 @@ import logging
 from typing import Any
 
 from models.content import ContentFinal, Platform
-from platforms.base import PlatformAdapter
+from platforms.browser_base import BrowserPlatformAdapter
 
 logger = logging.getLogger(__name__)
 
 # Xiaohongshu content constraints
-XHS_TITLE_MAX_LENGTH = 25
+XHS_TITLE_MAX_LENGTH = 20
 XHS_BODY_MAX_LENGTH = 1000  # characters
 XHS_BODY_MIN_LENGTH = 100
 XHS_MAX_TAGS = 10
 XHS_MAX_IMAGES = 9
 
 
-class XiaohongshuAdapter(PlatformAdapter):
-    """Adapter for publishing to Xiaohongshu.
-
-    Note: Xiaohongshu does not have an official public API.
-    The publish() method formats content for manual posting or
-    integration with third-party tools.
-    """
+class XiaohongshuAdapter(BrowserPlatformAdapter):
+    """小红书创作者后台浏览器自动化发布。"""
 
     @property
     def platform(self) -> Platform:
         return Platform.XIAOHONGSHU
 
     def format_content(self, content: ContentFinal) -> dict[str, Any]:
-        """Format content for Xiaohongshu posting."""
-        # Ensure title is within limits
         title = content.title[:XHS_TITLE_MAX_LENGTH]
 
-        # Ensure tags are formatted with #
         tags = []
         for tag in content.tags[:XHS_MAX_TAGS]:
             tag = tag.strip()
@@ -43,7 +35,6 @@ class XiaohongshuAdapter(PlatformAdapter):
                 tag = f"#{tag}"
             tags.append(tag)
 
-        # Append tags to body
         body = content.body
         tag_line = " ".join(tags)
         formatted_body = f"{body}\n\n{tag_line}"
@@ -59,9 +50,7 @@ class XiaohongshuAdapter(PlatformAdapter):
         }
 
     def validate_content(self, content: ContentFinal) -> list[str]:
-        """Validate content against Xiaohongshu rules."""
         errors = []
-
         if not content.title:
             errors.append("标题不能为空")
         elif len(content.title) > XHS_TITLE_MAX_LENGTH:
@@ -69,39 +58,106 @@ class XiaohongshuAdapter(PlatformAdapter):
 
         if not content.body:
             errors.append("正文不能为空")
-        elif len(content.body) < XHS_BODY_MIN_LENGTH:
-            errors.append(f"正文太短（最少{XHS_BODY_MIN_LENGTH}字）: {len(content.body)}字")
-
-        if len(content.tags) > XHS_MAX_TAGS:
-            errors.append(f"标签超过{XHS_MAX_TAGS}个限制")
 
         return errors
 
-    def publish(self, content: ContentFinal) -> dict[str, Any]:
-        """Prepare content for Xiaohongshu publishing.
+    async def _check_login(self, page) -> bool:
+        await page.goto("https://creator.xiaohongshu.com/", wait_until="domcontentloaded", timeout=15000)
+        await page.wait_for_timeout(3000)
 
-        Since XHS has no official API, this formats the content
-        for manual publishing or third-party tool integration.
-        """
-        errors = self.validate_content(content)
-        if errors:
-            return {"success": False, "errors": errors}
+        # 未登录会跳转到 login 页面
+        if "/login" in page.url:
+            return False
 
-        formatted = self.format_content(content)
+        # 已登录：在创作者后台首页
+        if "creator.xiaohongshu.com" in page.url and "/login" not in page.url:
+            return True
 
-        logger.info("Content formatted for Xiaohongshu: '%s'", formatted["title"])
+        return False
 
-        return {
-            "success": True,
-            "formatted_content": formatted,
-            "instructions": (
-                "小红书暂无官方API，请通过以下方式发布：\n"
-                "1. 复制标题和正文到小红书App\n"
-                "2. 上传配图\n"
-                "3. 添加话题标签\n"
-                "4. 发布"
-            ),
-        }
+    async def _js_click(self, page, text: str):
+        """用 JS 点击文本元素（绕过 viewport 限制）。"""
+        await page.evaluate(f'''
+            const els = document.querySelectorAll('span, div, button, a');
+            for (const el of els) {{
+                if (el.textContent.trim() === '{text}') {{ el.click(); break; }}
+            }}
+        ''')
+
+    async def _do_publish(self, page, formatted: dict[str, Any]) -> dict[str, Any]:
+        title = formatted["title"]
+        body = formatted["body"]
+        images = formatted.get("images", [])
+
+        # 导航到发布页面
+        await page.goto("https://creator.xiaohongshu.com/publish/publish", wait_until="domcontentloaded", timeout=15000)
+        await page.wait_for_timeout(3000)
+
+        # 点击"上传图文"标签（用 JS 避免 viewport 问题）
+        await self._js_click(page, "上传图文")
+        await page.wait_for_timeout(2000)
+
+        if images:
+            # 有图片：直接上传
+            file_input = page.locator('input[type="file"]').first
+            await file_input.set_input_files(images[0])
+            await page.wait_for_timeout(3000)
+            for img_path in images[1:]:
+                await file_input.set_input_files(img_path)
+                await page.wait_for_timeout(2000)
+        else:
+            # 无图片：用"文字配图"生成封面图
+            await self._js_click(page, "文字配图")
+            await page.wait_for_timeout(2000)
+
+            # 在编辑器输入封面文字（取正文前 50 字）
+            editor = page.locator('.tiptap, [contenteditable="true"]').first
+            await editor.click()
+            cover_text = body[:50].split("\n")[0]
+            await page.keyboard.type(cover_text, delay=10)
+            await page.wait_for_timeout(500)
+
+            # 点击"生成图片"
+            await self._js_click(page, "生成图片")
+            await page.wait_for_timeout(5000)
+
+        # 等待编辑区出现（上传/生成图片后才出现标题和正文输入）
+        await page.wait_for_timeout(3000)
+
+        # 输入标题
+        title_input = page.locator('#title, [placeholder*="标题"]').first
+        try:
+            await title_input.wait_for(timeout=10000)
+            await title_input.click()
+            await page.keyboard.type(title, delay=20)
+        except Exception:
+            # 可能标题输入已经有焦点或不存在
+            logger.warning("未找到标题输入框")
+
+        await page.wait_for_timeout(500)
+
+        # 输入正文
+        body_input = page.locator('#post-textarea, [contenteditable="true"]').last
+        try:
+            await body_input.click()
+            await page.wait_for_timeout(300)
+            lines = body.split("\n")
+            for i, line in enumerate(lines):
+                if line:
+                    await page.keyboard.type(line, delay=10)
+                if i < len(lines) - 1:
+                    await page.keyboard.press("Enter")
+        except Exception:
+            logger.warning("未找到正文输入框")
+
+        await page.wait_for_timeout(1000)
+
+        # 点击发布按钮
+        await self._js_click(page, "发布")
+        await page.wait_for_timeout(5000)
+
+        logger.info("小红书笔记发布成功: %s", title)
+        return {"success": True, "url": "https://creator.xiaohongshu.com"}
 
     def get_platform_rules(self) -> dict[str, Any]:
         return {

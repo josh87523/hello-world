@@ -46,8 +46,16 @@ class PlatformRegistry:
 # Auto-register built-in adapters
 def _register_defaults():
     from platforms.xiaohongshu import XiaohongshuAdapter
+    from platforms.twitter import TwitterAdapter
+    from platforms.jike import JikeAdapter
+    from platforms.threads import ThreadsAdapter
+    from platforms.instagram import InstagramAdapter
 
     PlatformRegistry.register(XiaohongshuAdapter)
+    PlatformRegistry.register(TwitterAdapter)
+    PlatformRegistry.register(JikeAdapter)
+    PlatformRegistry.register(ThreadsAdapter)
+    PlatformRegistry.register(InstagramAdapter)
 
 
 _register_defaults()

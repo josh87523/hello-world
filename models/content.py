@@ -28,6 +28,8 @@ class Platform(str, Enum):
     TWITTER = "twitter"
     INSTAGRAM = "instagram"
     TIKTOK = "tiktok"
+    JIKE = "jike"
+    THREADS = "threads"
 
 
 class ContentType(str, Enum):
