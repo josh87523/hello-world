@@ -74,6 +74,7 @@ async def launch_chrome_cdp(
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-background-timer-throttling",
+        "--disable-component-update",
         "--window-size=1440,900",
     ]
     if headless:
