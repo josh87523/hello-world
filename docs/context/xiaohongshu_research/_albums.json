@@ -1,0 +1,43 @@
+{
+  "description": "小红书收藏专辑 board ID 映射，用于批量抓取与增量同步",
+  "userProfileUrl": "https://www.xiaohongshu.com/user/profile/5f3913de0000000001007d55",
+  "collectionUrl": "https://www.xiaohongshu.com/user/profile/5f3913de0000000001007d55?tab=fav&subTab=board",
+  "lastSynced": "2026-02-26",
+  "toProcess": [],
+  "completed": [
+    {"name": "融资", "count": 6, "boardId": "6570454b0000000039021ea2", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "ai社交", "count": 4, "boardId": "67178168000000001800ba26", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "voice_ai", "count": 3, "boardId": "68366d55000000002201c580", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "ai小说", "count": 6, "boardId": "6793322800000000230000c4", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "ai课", "count": 3, "boardId": "647b1b83000000001102e969", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "黑客松", "count": 1, "boardId": "685b54a50000000023030eaa", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "跨境", "count": 5, "boardId": "66f4f40c000000001703e1f1", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "信息搜集", "count": 8, "boardId": "639f12b30000000001002c17", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "短剧", "count": 8, "boardId": "68931e8c000000000303b9c4", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "做内容", "count": 6, "boardId": "674bc6dd00000000310068e8", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "好封面", "count": 5, "boardId": "67d6f67c000000001b02b3ef", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "好形式", "count": 1, "boardId": "67da07f1000000002203c5a9", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "用户增长", "count": 11, "boardId": "6205c0ed000000000100a405", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "ai视频", "count": 13, "boardId": "68f370ff0000000013002dfd", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "好内容", "count": 21, "boardId": "67db57b30000000022039116", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "创业1", "count": 23, "boardId": "64328257000000001401de01", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "vc2", "count": 24, "boardId": "6242c58f0000000001005ded", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "创业2", "count": 31, "boardId": "655321d30000000018008359", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "账号运营", "count": 32, "boardId": "656219340000000039034053", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "出海增长", "count": 34, "boardId": "674c0505000000003001e8a5", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "vc1", "count": 49, "boardId": "671b74510000000018005e37", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "好标题", "count": 58, "boardId": "67d5875d000000002201d026", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "ai產品", "count": 61, "boardId": "67185768000000002101c6ab", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "ai陪伴", "count": 71, "boardId": "6912ed730000000012028376", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "ai自媒体", "count": 83, "boardId": "680974e2000000001b028814", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "写作ip号对标", "count": 85, "boardId": "697d3f82000000002501a620", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "好选题", "count": 91, "boardId": "67d8d7e5000000002201fce6", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"},
+    {"name": "职场基本功", "count": 272, "boardId": "633ea7fb0000000001004edd", "status": "done", "processedNoteIds": [], "lastSynced": "2026-02-26"}
+  ],
+  "skipped": [
+    {"name": "创业咨询", "count": 1, "boardId": "67a83190000000001b028cba", "reason": "empty"},
+    {"name": "好账号定位", "count": 1, "boardId": "682a905b000000002300b05d", "reason": "empty"},
+    {"name": "直播", "count": 1, "boardId": "680f2352000000001b02b16e", "reason": "empty"}
+  ],
+  "excluded": ["生活类", "北美pm", "面试", "Meme", "买菜", "打鼓", "爱情", "生活", "看世界", "好看的东西", "望京租房", "北京好玩", "养身", "养生", "省出一座金山", "美国🇺🇸", "香港", "唱歌", "识人", "发型", "攀岩", "股票"]
+}

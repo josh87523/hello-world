@@ -1,0 +1,38 @@
+{
+  "twitter": {
+    "title": "",
+    "body": "AI Agent 正在悄悄替代初级程序员。不是因为 AI 更聪明，而是因为大部分初级工作本质上就是模式匹配——而这恰好是 AI 最擅长的事。",
+    "tags": ["AI", "编程", "未来"],
+    "images": []
+  },
+  "jike": {
+    "title": "",
+    "body": "AI Agent 正在悄悄替代初级程序员。\n\n不是因为 AI 更聪明，而是因为大部分初级工作本质上就是模式匹配——而这恰好是 AI 最擅长的事。\n\n真正有危机感的不应该是程序员，而是所有把工作简化成 SOP 的岗位。当工作可以被标准化描述时，它就可以被 AI 执行。\n\n出路在于：做 AI 不会主动做的事——定义问题、做判断、承担责任。",
+    "tags": [],
+    "images": []
+  },
+  "threads": {
+    "title": "",
+    "body": "AI Agent 替代的不是程序员，是模式匹配。大部分初级工作本质上就是按规则操作。真正的编程是定义问题、做判断、承担责任。",
+    "tags": [],
+    "images": []
+  },
+  "wechat": {
+    "title": "AI Agent 正在悄悄替代初级程序员",
+    "body": "AI Agent 正在悄悄替代初级程序员。\n\n不是因为 AI 更聪明，而是因为大部分初级工作本质上就是模式匹配——而这恰好是 AI 最擅长的事。\n\n真正有危机感的不应该是程序员，而是所有把工作简化成 SOP 的岗位。当工作可以被标准化描述时，它就可以被 AI 执行。\n\n出路在于：做 AI 不会主动做的事——定义问题、做判断、承担责任。\n\n当你的工作可以被写成一份标准操作手册的时候，你就应该开始思考：如何让自己成为写手册的人，而不是执行手册的人。\n\nAI 时代真正的竞争力，是创造力和判断力。",
+    "tags": [],
+    "images": []
+  },
+  "instagram": {
+    "title": "",
+    "body": "AI Agent is quietly replacing junior programmers.\n\nNot because AI is smarter, but because most junior work is pattern matching — and that's exactly what AI excels at.\n\nThe real threat isn't to programmers. It's to anyone whose job can be reduced to an SOP.\n\n#AI #programming #future #tech #coding #artificialintelligence",
+    "tags": ["AI", "programming", "future", "tech"],
+    "images": ["/tmp/xhs_placeholder.png"]
+  },
+  "xiaohongshu": {
+    "title": "AI正在替代初级程序员",
+    "body": "AI Agent 正在悄悄替代初级程序员。\n\n不是因为 AI 更聪明，而是因为大部分初级工作本质上就是模式匹配——而这恰好是 AI 最擅长的事。\n\n真正有危机感的不应该是程序员，而是所有把工作简化成 SOP 的岗位。当工作可以被标准化描述时，它就可以被 AI 执行。\n\n出路在于：做 AI 不会主动做的事——定义问题、做判断、承担责任。\n\n你觉得你的工作能被 AI 替代吗？",
+    "tags": ["AI", "程序员", "职场", "科技", "人工智能"],
+    "images": []
+  }
+}
